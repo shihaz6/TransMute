@@ -33,6 +33,24 @@ export interface OrderLineInput {
   unitPrice?: number;
 }
 
+/** The customer message a quote or order was taken from. */
+export interface OriginalMessageInput {
+  sender: string;
+  phoneOrEmail: string;
+  timestamp: string;
+  text: string;
+  voiceTranscript: boolean;
+  voiceDuration: string | null;
+}
+
+export interface OrderCreateInput {
+  type: 'order' | 'quote';
+  customerId: string;
+  source?: string;
+  items?: OrderLineInput[];
+  originalMessage?: OriginalMessageInput;
+}
+
 export interface ReceiptInput {
   receivedBy?: string;
   warehouse?: string;
@@ -87,8 +105,7 @@ export const erpApi = {
 
   // Sales orders and quotes
   orders: () => apiGet<SalesOrderDto[]>('/api/orders'),
-  createOrder: (body: { type: 'order' | 'quote'; customerId: string; source?: string; items?: OrderLineInput[] }) =>
-    apiSend<SalesOrderDto>('POST', '/api/orders', body),
+  createOrder: (body: OrderCreateInput) => apiSend<SalesOrderDto>('POST', '/api/orders', body),
   replaceQuoteItems: (id: string, lines: OrderLineInput[]) =>
     apiSend<SalesOrderDto>('PUT', `/api/orders/${id}/items`, lines),
   convertQuote: (id: string) => apiSend<SalesOrderDto>('POST', `/api/orders/${id}/convert`),

@@ -51,7 +51,7 @@ export function AlertsScreen() {
       module: 'Alerts',
       action: `${status === 'resolved' ? 'Resolved' : 'Dismissed'} ${alert.category}: ${alert.title}`,
       reason: `Owner reviewed evidence (${alert.evidence.map((e) => e.label).join(', ')}) and marked ${status}.`,
-      approvedBy: 'Rohan (Owner)',
+      approvedBy: 'Owner',
       outcome: status === 'resolved' ? 'approved' : 'rejected',
     });
     addToast({
@@ -116,8 +116,12 @@ export function AlertsScreen() {
         <Card>
           <EmptyState
             icon={<CheckCircle2 className="w-6 h-6 text-emerald-500" />}
-            title="All clear — no open anomalies"
-            description="Every AI-flagged issue has been reviewed and resolved."
+            title={alerts.length === 0 ? 'No alerts yet' : 'All clear — no open anomalies'}
+            description={
+              alerts.length === 0
+                ? 'Anomalies appear here once Transmute has checked invoices, bank details, stock and margins.'
+                : 'Every flagged issue has been reviewed.'
+            }
           />
         </Card>
       ) : (

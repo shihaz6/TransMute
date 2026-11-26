@@ -251,7 +251,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <TransmuteWordmark />
           <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-2 leading-none flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            Lanka Crest Wholesale · Colombo
+            Business workspace
           </div>
         </button>
         <button
@@ -299,7 +299,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 AI Action Log
               </div>
               <div className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
-                {aiLogs.length} audited actions today
+                {aiLogs.length} audited actions
               </div>
             </div>
           </div>
@@ -308,14 +308,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="flex items-center gap-2.5 px-1.5">
           <div className="w-8 h-8 rounded-full bg-zinc-900 dark:bg-[#EA581A] text-white text-xs font-semibold flex items-center justify-center shrink-0">
-            RP
+            OW
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold text-zinc-900 dark:text-white truncate">
-              Rohan Perera
+              Owner
             </div>
             <div className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
-              Owner · Colombo HQ
+              Workspace owner
             </div>
           </div>
         </div>
@@ -393,31 +393,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                         {[
                           {
-                            label: 'Top 10 slow-paying customers this quarter',
+                            label: 'Who owes me the most?',
                             action: () => {
-                              setPendingReportQuery('Top 10 slow-paying customers this quarter');
+                              setPendingReportQuery('Who owes me the most?');
                               setRoute('reports');
                               setSearchOpen(false);
                             },
                           },
                           {
-                            label: 'Review Marina Oils invoice MEO-2026-8841',
+                            label: 'Open the document inbox',
                             action: () => {
-                              navigateToEntity('documents', 'DOC-9041');
+                              setRoute('documents');
                               setSearchOpen(false);
                             },
                           },
                           {
-                            label: 'Check Wijesinghe Super Centre credit warning',
+                            label: 'Open customers',
                             action: () => {
-                              navigateToEntity('orders', 'SO-4821');
+                              setRoute('customers');
                               setSearchOpen(false);
                             },
                           },
                           {
-                            label: 'Suppliers with price increases',
+                            label: 'Open purchasing',
                             action: () => {
-                              navigateToEntity('purchasing', 'SUP-01');
+                              setRoute('purchasing');
                               setSearchOpen(false);
                             },
                           },

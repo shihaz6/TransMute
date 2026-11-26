@@ -773,6 +773,18 @@ class ValidationAndRulesTest {
     // ---------- Reports and dashboard ----------
 
     @Test
+    void dailyHaikuIsThreeLinesAndStableWithinADay() throws Exception {
+        String first = mvc.perform(get("/api/haiku?date=2026-03-10")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines.length()").value(3))
+                .andReturn().getResponse().getContentAsString();
+        String again = mvc.perform(get("/api/haiku?date=2026-03-10")).andReturn().getResponse().getContentAsString();
+        String nextDay = mvc.perform(get("/api/haiku?date=2026-03-11")).andReturn().getResponse().getContentAsString();
+        List<String> verse = JsonPath.read(first, "$.lines");
+        assertThat(JsonPath.<List<String>>read(again, "$.lines")).isEqualTo(verse);
+        assertThat(JsonPath.<List<String>>read(nextDay, "$.lines")).isNotEqualTo(verse);
+    }
+
+    @Test
     void reportKindMustBeKnown() throws Exception {
         mvc.perform(get("/api/reports/gossip")).andExpect(status().isNotFound());
     }

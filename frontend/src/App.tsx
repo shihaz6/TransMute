@@ -16,6 +16,27 @@ import { AlertsScreen } from '@/screens/AlertsScreen';
 import { ReportsScreen } from '@/screens/ReportsScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 
+function BackendNotice() {
+  const { loadError, loading, reload } = useErp();
+  if (!loadError || loading) return null;
+  return (
+    <div
+      role="alert"
+      className="fixed bottom-0 inset-x-0 z-[60] flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 bg-amber-50 dark:bg-amber-950 border-t border-amber-300 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200"
+    >
+      <span>
+        {loadError} Start the backend with <code className="font-mono">./mvnw spring-boot:run</code> in the backend folder, then retry.
+      </span>
+      <button
+        onClick={() => void reload()}
+        className="self-start sm:self-auto px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 cursor-pointer"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
 function TransmuteRouter() {
   const { route, toasts, dismissToast } = useErp();
 
@@ -51,6 +72,7 @@ function TransmuteRouter() {
   return (
     <>
       <AppShell>{renderScreen()}</AppShell>
+      <BackendNotice />
       <AIActionLogDrawer />
       <CatalystPanel />
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

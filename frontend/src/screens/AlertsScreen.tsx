@@ -20,15 +20,7 @@ import { AlertStatus, AnomalyAlert } from '@/types/erp';
 import { formatRs } from '@/utils/format';
 
 export function AlertsScreen() {
-  const {
-    alerts,
-    setAlerts,
-    selectedAlertId,
-    setSelectedAlertId,
-    navigateToEntity,
-    addAiLog,
-    addToast,
-  } = useErp();
+  const { alerts, selectedAlertId, setSelectedAlertId, navigateToEntity, setAlertStatus } = useErp();
 
   const [statusTab, setStatusTab] = useState<'open' | 'resolved' | 'all'>('open');
 
@@ -46,19 +38,7 @@ export function AlertsScreen() {
   }, [alerts, selectedAlertId, filtered]);
 
   const updateAlertStatus = (alert: AnomalyAlert, status: AlertStatus) => {
-    setAlerts((prev) => prev.map((a) => (a.id === alert.id ? { ...a, status } : a)));
-    addAiLog({
-      module: 'Alerts',
-      action: `${status === 'resolved' ? 'Resolved' : 'Dismissed'} ${alert.category}: ${alert.title}`,
-      reason: `Owner reviewed evidence (${alert.evidence.map((e) => e.label).join(', ')}) and marked ${status}.`,
-      approvedBy: 'Owner',
-      outcome: status === 'resolved' ? 'approved' : 'rejected',
-    });
-    addToast({
-      title: status === 'resolved' ? 'Anomaly Marked Resolved' : 'Alert Dismissed',
-      description: alert.title,
-      variant: status === 'resolved' ? 'success' : 'info',
-    });
+    void setAlertStatus(alert.id, status);
   };
 
   const severityChip = (sev: AnomalyAlert['severity']) => {

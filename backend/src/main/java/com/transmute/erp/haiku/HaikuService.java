@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 /**
  * Supplies the haiku for a day. When an API key is configured, a Claude model writes it once
  * per day and the result is kept in memory. Otherwise, or if the model call fails, the fixed
- * verse for that day is used.
+ * verse for that day is used. Both are written for a grocery and food distribution business.
  */
 @Service
 public class HaikuService {
@@ -20,26 +20,26 @@ public class HaikuService {
     }
 
     private static final List<List<String>> FIXED = List.of(
-            List.of("Quiet ledger hums", "each figure finds its own place", "the machine keeps count"),
-            List.of("Morning invoice stack", "a supplier's bill waits its turn", "review, then approve"),
-            List.of("Shelves counted at dawn", "numbers settle into rows", "the warehouse breathes"),
-            List.of("A cheque on the desk", "deposited, then cleared at last", "the balance climbs up"),
-            List.of("Orders arrive small", "gathered in one steady stream", "the day finds its shape"),
-            List.of("Reorder line drawn", "stock falls toward its marked level", "draft the order early"),
-            List.of("Receivables grey", "a reminder kindly worded", "trust returns in time"),
-            List.of("Quote lines take form", "price, then promise, then the sale", "a plain pen, a plan"),
-            List.of("Rain on the tin roof", "the bank statement balances", "one line at a time"),
-            List.of("Small wins add up", "a receipt checked against the PO", "nothing goes astray"),
-            List.of("Dust on the ledger", "we wipe it with careful hands", "and start again fresh"),
-            List.of("Lantern in the dusk", "the last invoice of the day", "signed, the desk is clear"),
-            List.of("Two lists, one truth", "stock on the shelf and in the book", "they agree at last"),
-            List.of("Sun on the crates", "loaded, counted, sent away", "the van turns for home"),
-            List.of("A quiet alert", "a bank account changed overnight", "we pause and we ask"),
-            List.of("Tea cools by the screen", "the morning's sales still rising", "steady as the tide"),
-            List.of("Coins in a jar", "add up slowly, day by day", "so do good habits"),
-            List.of("The margin written", "in the margin of the page", "small notes, sharp eyes"),
-            List.of("Harvest of the week", "sold, received, paid and filed", "the books breathe out"),
-            List.of("Ask a simple thing", "the answer comes in plain words", "numbers, no fuss"));
+            List.of("Pallets at the dock", "manifests checked against the truck", "the route starts at dawn"),
+            List.of("Cold room hums at four", "milk and eggs logged by the date", "first in, first out"),
+            List.of("Shelves restocked by night", "the shop floor ready before light", "the aisles breathe again"),
+            List.of("Van loaded by stop", "each drop sealed on its invoice", "the driver signs off"),
+            List.of("Expiry dates checked", "the oldest tins move to the front", "waste held in check"),
+            List.of("Reorder point crossed", "rice and oil drawn down by the week", "the purchase order goes"),
+            List.of("Supplier's invoice", "matched to the goods received note", "three ways agree"),
+            List.of("Ten cases at the gate", "the delivery counted by hand", "the shortfall noted"),
+            List.of("Retail orders in", "from the mart, the shop, the stall", "one list for the day"),
+            List.of("A grocer's balance", "climbs toward its credit limit", "the reminder goes out"),
+            List.of("Cash from the till", "banked before the lorry comes", "the statement matches"),
+            List.of("Sugar price rises", "the margin checked sack by sack", "the new rate noted"),
+            List.of("Market day rush", "the counter fills, the bags tie", "change in a steady hand"),
+            List.of("Freezers humming low", "the chain holds from farm to shelf", "cold keeps the trust"),
+            List.of("Chilli, turmeric", "cartons stacked in the warehouse", "the spice smell lingers"),
+            List.of("Morning dispatch run", "sealed crates, route cards, signed", "the truck pulls away"),
+            List.of("Stock count at close", "shrinkage shows on one line", "we find it and fix it"),
+            List.of("Substitute brand", "offered when the rice runs short", "the shopper nods yes"),
+            List.of("Rent, wages, fuel", "all paid before the week ends", "the margin holds firm"),
+            List.of("Quiet stock room", "sacks counted by the window", "the week is balanced"));
 
     private final AnthropicHaikuClient claude;
 

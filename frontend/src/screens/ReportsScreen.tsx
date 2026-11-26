@@ -1,11 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Bookmark,
-  BookmarkCheck,
-  Download,
-  Send,
-  Sparkles,
-} from 'lucide-react';
+import { Bookmark, BookmarkCheck, Download, Send, Sparkles } from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -18,16 +12,8 @@ import {
   YAxis,
 } from 'recharts';
 import { useErp } from '@/context/ErpContext';
-import {
-  Button,
-  Card,
-  cn,
-  PageHeader,
-  SkeletonBlock,
-  StatusChip,
-} from '@/components/ui/Primitives';
-import { Customer, InventoryItem, PurchaseOrder, ReportResult } from '@/types/erp';
-import { formatRs } from '@/utils/format';
+import { Button, Card, cn, PageHeader, SkeletonBlock, StatusChip } from '@/components/ui/Primitives';
+import { ReportResult } from '@/types/erp';
 
 const SUGGESTED_PROMPTS = [
   'Who owes me the most?',
@@ -35,92 +21,7 @@ const SUGGESTED_PROMPTS = [
   'Show open purchase orders',
 ];
 
-interface ReportSource {
-  customers: Customer[];
-  inventory: InventoryItem[];
-  pos: PurchaseOrder[];
-}
-
-// Builds a report only from the data the app currently holds. Returns null when the
-// question does not match a report that can be computed.
-function buildReport(query: string, src: ReportSource): ReportResult | null {
-  const q = query.toLowerCase();
-  const base = {
-    id: `REP-${Date.now()}`,
-    query,
-    timestamp: new Date().toLocaleString('en-GB'),
-    saved: false,
-  };
-
-  if (/owe|overdue|receiv|debt|balance|slow/.test(q)) {
-    const rows = [...src.customers].sort((a, b) => b.outstandingBalance - a.outstandingBalance);
-    const total = rows.reduce((s, c) => s + c.outstandingBalance, 0);
-    const over30 = rows.filter((c) => c.daysOverdue >= 30).length;
-    return {
-      ...base,
-      title: 'Receivables by customer',
-      summary:
-        rows.length === 0
-          ? 'No customer balances are recorded yet.'
-          : `${formatRs(total)} is owed across ${rows.length} customers. ${over30} of them are 30 or more days overdue.`,
-      methodology:
-        'Outstanding balance per customer, sorted from highest to lowest. Overdue days and risk come from each customer record.',
-      chartType: 'bar',
-      valueLabel: 'Outstanding (Rs.)',
-      chartData: rows.map((c) => ({ name: c.name, value: c.outstandingBalance })),
-      columns: ['Customer', 'Outstanding', 'Days overdue', 'Credit limit', 'Risk'],
-      rows: rows.map((c) => [
-        c.name,
-        formatRs(c.outstandingBalance),
-        `${c.daysOverdue} days`,
-        formatRs(c.creditLimit),
-        c.risk,
-      ]),
-    };
-  }
-
-  if (/stock|inventory|reorder|low/.test(q)) {
-    const rows = src.inventory;
-    const totalOf = (i: InventoryItem) => i.warehouseStock + i.shopStock + i.vanStock;
-    const low = rows.filter((i) => totalOf(i) <= i.reorderLevel).length;
-    return {
-      ...base,
-      title: 'Stock on hand by item',
-      summary:
-        rows.length === 0
-          ? 'No inventory items are recorded yet.'
-          : `${low} of ${rows.length} items are at or below their reorder level.`,
-      methodology: 'Units on hand summed across warehouse, shop and van. Compared with each item’s reorder level.',
-      chartType: 'bar',
-      valueLabel: 'Units on hand',
-      chartData: rows.map((i) => ({ name: i.name, value: totalOf(i) })),
-      columns: ['Item', 'Warehouse', 'Shop', 'Van', 'Total', 'Reorder level'],
-      rows: rows.map((i) => [i.name, i.warehouseStock, i.shopStock, i.vanStock, totalOf(i), i.reorderLevel]),
-    };
-  }
-
-  if (/purchase|supplier|\bpo\b|\bpos\b/.test(q)) {
-    const rows = src.pos;
-    const total = rows.reduce((s, p) => s + p.total, 0);
-    return {
-      ...base,
-      title: 'Purchase orders',
-      summary:
-        rows.length === 0
-          ? 'No purchase orders are recorded yet.'
-          : `${rows.length} purchase orders totalling ${formatRs(total)}.`,
-      methodology: 'Each purchase order with its status and total value.',
-      chartType: 'bar',
-      valueLabel: 'PO total (Rs.)',
-      chartData: rows.map((p) => ({ name: p.id, value: p.total })),
-      columns: ['PO', 'Supplier', 'Status', 'Total'],
-      rows: rows.map((p) => [p.id, p.supplierName, p.status, formatRs(p.total)]),
-    };
-  }
-
-  return null;
-}
-
+/** Downloads a report's table as a CSV file. */
 function downloadCsv(rep: ReportResult) {
   const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
   const lines = [rep.columns.map(esc).join(','), ...rep.rows.map((r) => r.map(esc).join(','))];
@@ -134,44 +35,24 @@ function downloadCsv(rep: ReportResult) {
 }
 
 export function ReportsScreen() {
-  const {
-    reports,
-    setReports,
-    customers,
-    inventory,
-    pos,
-    pendingReportQuery,
-    setPendingReportQuery,
-    addToast,
-  } = useErp();
+  const { reports, setReports, runReport, pendingReportQuery, setPendingReportQuery, addToast } = useErp();
   const [queryInput, setQueryInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeReportId, setActiveReportId] = useState<string>(reports[0]?.id || '');
 
-  const runQuery = (text: string) => {
+  const runQuery = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     setLoading(true);
     setQueryInput('');
-    setTimeout(() => {
-      const generated = buildReport(trimmed, { customers, inventory, pos });
-      setLoading(false);
-      if (!generated) {
-        addToast({
-          title: 'No report for that question yet',
-          description: 'Try "who owes me the most", "low stock items" or "open purchase orders".',
-          variant: 'info',
-        });
-        return;
-      }
-      setReports((prev) => [generated, ...prev]);
-      setActiveReportId(generated.id);
-    }, 300);
+    const report = await runReport(trimmed);
+    setLoading(false);
+    if (report) setActiveReportId(report.id);
   };
 
   useEffect(() => {
     if (pendingReportQuery) {
-      runQuery(pendingReportQuery);
+      void runQuery(pendingReportQuery);
       setPendingReportQuery(null);
     }
   }, [pendingReportQuery]);
@@ -180,9 +61,7 @@ export function ReportsScreen() {
 
   const toggleSaveReport = (rep: ReportResult) => {
     const nextSaved = !rep.saved;
-    setReports((prev) =>
-      prev.map((r) => (r.id === rep.id ? { ...r, saved: nextSaved } : r))
-    );
+    setReports((prev) => prev.map((r) => (r.id === rep.id ? { ...r, saved: nextSaved } : r)));
     addToast({
       title: nextSaved ? 'Saved to Reports Library' : 'Removed from Saved Reports',
       description: rep.title,
@@ -205,7 +84,7 @@ export function ReportsScreen() {
             <input
               value={queryInput}
               onChange={(e) => setQueryInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && runQuery(queryInput)}
+              onKeyDown={(e) => e.key === 'Enter' && void runQuery(queryInput)}
               placeholder='Try: "who owes me the most" or "low stock items"'
               className="w-full pl-10 pr-4 py-3 text-sm rounded-xl bg-white dark:bg-[#111113] border border-stone-200 dark:border-zinc-800 text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:border-[#EA581A] focus:ring-2 focus:ring-[#EA581A]/20"
             />
@@ -214,7 +93,7 @@ export function ReportsScreen() {
             variant="gold"
             size="lg"
             icon={<Send className="w-4 h-4" />}
-            onClick={() => runQuery(queryInput)}
+            onClick={() => void runQuery(queryInput)}
           >
             Ask Transmute
           </Button>
@@ -225,7 +104,7 @@ export function ReportsScreen() {
           {SUGGESTED_PROMPTS.map((prompt) => (
             <button
               key={prompt}
-              onClick={() => runQuery(prompt)}
+              onClick={() => void runQuery(prompt)}
               className="px-3 py-1 rounded-full text-xs bg-white dark:bg-zinc-900 border border-stone-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-[#EA581A] hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer"
             >
               {prompt}
@@ -265,6 +144,9 @@ export function ReportsScreen() {
               </button>
             ))}
           </div>
+          <p className="text-[10px] text-slate-400">
+            Reports are kept for this session. Saved status is not stored on the server yet.
+          </p>
         </Card>
 
         <div className="xl:col-span-9 space-y-4">
@@ -323,9 +205,7 @@ export function ReportsScreen() {
                   <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/80 dark:border-slate-800 text-xs text-slate-500 flex items-start gap-2">
                     <Sparkles className="w-3.5 h-3.5 text-[#EA581A] shrink-0 mt-0.5" />
                     <span>
-                      <strong className="text-slate-700 dark:text-slate-200">
-                        How this was calculated:
-                      </strong>{' '}
+                      <strong className="text-slate-700 dark:text-slate-200">How this was calculated:</strong>{' '}
                       {activeReport.methodology}
                     </span>
                   </div>
@@ -335,55 +215,20 @@ export function ReportsScreen() {
                   <div className="h-64 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       {activeReport.chartType === 'bar' ? (
-                        <BarChart
-                          data={activeReport.chartData}
-                          margin={{ top: 8, right: 8, left: -12, bottom: 0 }}
-                        >
+                        <BarChart data={activeReport.chartData} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" opacity={0.16} />
-                          <XAxis
-                            dataKey="name"
-                            tick={{ fontSize: 11, fill: '#64748b' }}
-                            axisLine={false}
-                            tickLine={false}
-                          />
-                          <YAxis
-                            tick={{ fontSize: 11, fill: '#64748b' }}
-                            axisLine={false}
-                            tickLine={false}
-                          />
+                          <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
                           <Tooltip contentStyle={{ borderRadius: 12, fontSize: 12 }} />
-                          <Bar
-                            dataKey="value"
-                            name={activeReport.valueLabel}
-                            fill="#EA581A"
-                            radius={[6, 6, 0, 0]}
-                          />
+                          <Bar dataKey="value" name={activeReport.valueLabel} fill="#EA581A" radius={[6, 6, 0, 0]} />
                         </BarChart>
                       ) : (
-                        <LineChart
-                          data={activeReport.chartData}
-                          margin={{ top: 8, right: 8, left: -12, bottom: 0 }}
-                        >
+                        <LineChart data={activeReport.chartData} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" opacity={0.16} />
-                          <XAxis
-                            dataKey="name"
-                            tick={{ fontSize: 11, fill: '#64748b' }}
-                            axisLine={false}
-                            tickLine={false}
-                          />
-                          <YAxis
-                            tick={{ fontSize: 11, fill: '#64748b' }}
-                            axisLine={false}
-                            tickLine={false}
-                          />
+                          <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
                           <Tooltip contentStyle={{ borderRadius: 12, fontSize: 12 }} />
-                          <Line
-                            type="monotone"
-                            dataKey="value"
-                            name={activeReport.valueLabel}
-                            stroke="#EA581A"
-                            strokeWidth={2.5}
-                          />
+                          <Line type="monotone" dataKey="value" name={activeReport.valueLabel} stroke="#EA581A" strokeWidth={2.5} />
                           {activeReport.secondaryLabel && (
                             <Line
                               type="monotone"

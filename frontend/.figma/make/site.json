@@ -1,0 +1,10 @@
+{
+  "description": "AI-powered ERP helps distributors, wholesalers, and shop owners manage sales, inventory, purchasing, and finances with clear insights and human-reviewed automation.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

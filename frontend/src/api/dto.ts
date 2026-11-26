@@ -305,6 +305,11 @@ export interface ReportViewDto {
   rows: unknown[][];
 }
 
+export interface DailyHaikuDto {
+  date: string;
+  lines: string[];
+}
+
 export interface DashboardSummaryDto {
   cashPosition: number;
   salesOrdersTotal: number;

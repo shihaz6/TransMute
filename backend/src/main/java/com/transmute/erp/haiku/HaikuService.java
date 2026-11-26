@@ -8,14 +8,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
 
 /**
- * Supplies the haiku for a day. When an API key is configured, a Claude model writes it once
+ * Supplies the haiku for a day. When an API key is configured, an AI model writes it once
  * per day and the result is kept in memory. Otherwise, or if the model call fails, the fixed
  * verse for that day is used. Both are written for a grocery and food distribution business.
  */
 @Service
 public class HaikuService {
 
-    /** The haiku for one day. {@code source} is "claude" when a model wrote it, else "fixed". */
+    /** The haiku for one day. {@code source} is "ai" when a model wrote it, else "fixed". */
     public record DailyHaiku(String date, List<String> lines, String source) {
     }
 
@@ -41,13 +41,13 @@ public class HaikuService {
             List.of("Rent, wages, fuel", "all paid before the week ends", "the margin holds firm"),
             List.of("Quiet stock room", "sacks counted by the window", "the week is balanced"));
 
-    private final AnthropicHaikuClient claude;
+    private final GroqHaikuClient ai;
 
     /** One haiku per date, kept for the life of the process so the model is called once a day. */
     private final Map<LocalDate, DailyHaiku> today = new ConcurrentHashMap<>();
 
-    public HaikuService(AnthropicHaikuClient claude) {
-        this.claude = claude;
+    public HaikuService(GroqHaikuClient ai) {
+        this.ai = ai;
     }
 
     public DailyHaiku forDate(LocalDate date) {
@@ -55,9 +55,9 @@ public class HaikuService {
     }
 
     private DailyHaiku build(LocalDate date) {
-        Optional<List<String>> written = claude.writeHaiku(date.toString());
+        Optional<List<String>> written = ai.writeHaiku(date.toString());
         if (written.isPresent()) {
-            return new DailyHaiku(date.toString(), written.get(), "claude");
+            return new DailyHaiku(date.toString(), written.get(), "ai");
         }
         int index = date.getDayOfYear() % FIXED.size();
         return new DailyHaiku(date.toString(), FIXED.get(index), "fixed");

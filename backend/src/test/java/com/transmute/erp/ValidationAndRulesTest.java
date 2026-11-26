@@ -30,7 +30,8 @@ import org.springframework.test.web.servlet.MvcResult;
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:validation-test;DB_CLOSE_DELAY=-1",
         "spring.jpa.hibernate.ddl-auto=create-drop",
-        "transmute.storage.dir=target/validation-uploads"
+        "transmute.storage.dir=target/validation-uploads",
+        "transmute.haiku.anthropic-api-key="
 })
 @AutoConfigureMockMvc
 class ValidationAndRulesTest {
@@ -780,6 +781,8 @@ class ValidationAndRulesTest {
         String again = mvc.perform(get("/api/haiku?date=2026-03-10")).andReturn().getResponse().getContentAsString();
         String nextDay = mvc.perform(get("/api/haiku?date=2026-03-11")).andReturn().getResponse().getContentAsString();
         List<String> verse = JsonPath.read(first, "$.lines");
+        // No API key is configured in tests, so the fixed verses are used and no network call is made.
+        assertThat(JsonPath.<String>read(first, "$.source")).isEqualTo("fixed");
         assertThat(JsonPath.<List<String>>read(again, "$.lines")).isEqualTo(verse);
         assertThat(JsonPath.<List<String>>read(nextDay, "$.lines")).isNotEqualTo(verse);
     }

@@ -154,7 +154,7 @@ export function DashboardScreen() {
           <p className="text-[11px] font-semibold uppercase tracking-wider text-[#C2410C] dark:text-[#FF9E66]">
             Haiku of the day
             <span className="ml-2 normal-case tracking-normal font-normal text-zinc-400">
-              {haiku.source === 'claude' ? 'written by Claude today' : 'from the built-in set'}
+              {haiku.source === 'ai' ? 'written by AI today' : 'from the built-in set'}
             </span>
           </p>
           <blockquote className="mt-2 text-sm italic text-zinc-700 dark:text-zinc-300 leading-relaxed">

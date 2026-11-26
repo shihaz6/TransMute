@@ -33,10 +33,14 @@ export function PurchasingScreen() {
     selectedSupplierId,
     setSelectedSupplierId,
     navigateToEntity,
+    sendPurchaseOrder,
+    receivePurchaseOrder,
   } = useErp();
 
   const [subTab, setSubTab] = useState<'pos' | 'grns' | 'suppliers'>('pos');
   const [selectedPoId, setSelectedPoId] = useState<string | null>(null);
+  // Quantities typed into the receipt form, keyed by SKU.
+  const [receiveQty, setReceiveQty] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (selectedSupplierId) {
@@ -95,6 +99,11 @@ export function PurchasingScreen() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {activePo.status === 'draft' && (
+              <Button variant="gold" size="sm" onClick={() => void sendPurchaseOrder(activePo.id)}>
+                Send to supplier
+              </Button>
+            )}
             {activePo.linkedInvoiceId && (
               <Button
                 variant="gold"
@@ -107,6 +116,51 @@ export function PurchasingScreen() {
             )}
           </div>
         </div>
+
+        {/* Receipt form: enter what arrived for each line. Stock is added to the warehouse. */}
+        {(activePo.status === 'sent' || activePo.status === 'partial-received') && (
+          <Card className="p-5 space-y-3">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Record goods received</h3>
+            <div className="space-y-2">
+              {activePo.lines.map((line) => {
+                const outstanding = line.orderedQty - line.receivedQty;
+                return (
+                  <div key={line.sku} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <span className="text-slate-700 dark:text-slate-200">
+                      {line.productName} ({line.sku}) · {outstanding} {line.unit} outstanding
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={outstanding}
+                      disabled={outstanding <= 0}
+                      value={receiveQty[line.sku] ?? ''}
+                      onChange={(e) => setReceiveQty((prev) => ({ ...prev, [line.sku]: e.target.value }))}
+                      placeholder="Qty received"
+                      className="w-full sm:w-40 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 disabled:opacity-50"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex justify-end">
+              <Button
+                variant="gold"
+                size="sm"
+                onClick={async () => {
+                  const lines = activePo.lines
+                    .map((l) => ({ sku: l.sku, qty: Number(receiveQty[l.sku] ?? 0) }))
+                    .filter((l) => l.qty > 0);
+                  if (lines.length === 0) return;
+                  await receivePurchaseOrder(activePo.id, { receivedBy: 'Owner', lines });
+                  setReceiveQty({});
+                }}
+              >
+                Record receipt
+              </Button>
+            </div>
+          </Card>
+        )}
 
         {/* Linked GRN & Invoice Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -496,7 +550,7 @@ export function PurchasingScreen() {
                     </td>
                     <td className="px-4 py-3.5">{poStatusChip(po.status)}</td>
                     <td className="px-5 py-3.5 text-right">
-                      <Button variant="secondary" size="xs">
+                      <Button variant="secondary" size="xs" onClick={() => setSelectedPoId(po.id)}>
                         3-Way Detail
                       </Button>
                     </td>

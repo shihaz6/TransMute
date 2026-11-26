@@ -308,8 +308,8 @@ export interface ReportViewDto {
 export interface DailyHaikuDto {
   date: string;
   lines: string[];
-  /** "claude" when a model wrote the verse, "fixed" when it came from the built-in set. */
-  source: 'claude' | 'fixed';
+  /** "ai" when a model wrote the verse, "fixed" when it came from the built-in set. */
+  source: 'ai' | 'fixed';
 }
 
 export interface DashboardSummaryDto {

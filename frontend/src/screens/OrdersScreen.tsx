@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
-  FileText,
   Mail,
   MessageSquare,
   Mic,
@@ -31,6 +30,7 @@ import { formatRs } from '@/utils/format';
 export function OrdersScreen() {
   const {
     orders,
+    customers,
     setOrders,
     selectedOrderId,
     setSelectedOrderId,
@@ -42,10 +42,8 @@ export function OrdersScreen() {
   const [tab, setTab] = useState<'all' | 'whatsapp' | 'quotes' | 'credit-hold'>('all');
   const [search, setSearch] = useState('');
   const [quoteModalOpen, setQuoteModalOpen] = useState(false);
-  const [quoteThreadText, setQuoteThreadText] = useState(
-    'Email from Sanjeewa (Gampaha Trade Mart):\n"Good morning Rohan, please send best wholesale quotation for 35 cases Marina Coconut Oil 1L and 20 cartons Anchor Milk Powder 400g delivered to Gampaha next week."'
-  );
-  const [quoteCustomer, setQuoteCustomer] = useState('Gampaha Trade Mart');
+  const [quoteThreadText, setQuoteThreadText] = useState('');
+  const [quoteCustomerId, setQuoteCustomerId] = useState('');
 
   const activeOrder = useMemo(
     () => orders.find((o) => o.id === selectedOrderId) || null,
@@ -76,77 +74,58 @@ export function OrdersScreen() {
       module: 'Orders',
       action: `Confirmed & invoiced ${order.id} for ${order.customerName} (${formatRs(order.total)})`,
       reason: order.creditWarning
-        ? 'Owner approved credit-limit override after reviewing customer overdue balance.'
-        : 'Stock availability verified across Main Warehouse; WhatsApp invoice PDF dispatched.',
-      confidence: order.aiConfidence ?? 96,
-      approvedBy: 'Rohan (Owner)',
+        ? 'Order exceeded the customer credit limit; owner confirmed it.'
+        : 'Owner confirmed the order.',
+      approvedBy: 'Owner',
       outcome: 'approved',
     });
     addToast({
-      title: `${order.id} Confirmed & Invoiced`,
-      description: `Invoice sent to ${order.customerName} and warehouse picklist generated.`,
+      title: `${order.id} confirmed & invoiced`,
+      description: `Invoice created for ${order.customerName}.`,
       variant: 'success',
     });
   };
 
+  // Creates a quote record from the pasted text and the chosen customer. Line items
+  // are not parsed automatically yet, so the quote starts with no items and no price.
   const handleCreateQuoteFromThread = () => {
-    const newId = `QT-${1095 + orders.length}`;
+    const customer = customers.find((c) => c.id === quoteCustomerId);
+    if (!customer || !quoteThreadText.trim()) return;
+    const now = new Date();
+    const newId = `QT-${now.getTime().toString().slice(-8)}`;
     const newQuote: SalesOrder = {
       id: newId,
       type: 'quote',
-      customerId: 'CUST-04',
-      customerName: quoteCustomer,
+      customerId: customer.id,
+      customerName: customer.name,
       source: quoteThreadText.toLowerCase().includes('whatsapp') ? 'whatsapp' : 'email',
-      createdAt: 'Just now',
+      createdAt: now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
       status: 'quote',
-      total: 192100,
-      aiConfidence: 96,
+      total: 0,
       originalMessage: {
-        sender: quoteCustomer,
-        phoneOrEmail: 'Parsed from chat/email thread',
-        timestamp: 'Just now',
+        sender: customer.contactPerson || customer.name,
+        phoneOrEmail: customer.phone,
+        timestamp: now.toLocaleString('en-GB'),
         text: quoteThreadText,
       },
-      items: [
-        {
-          id: `q-${Date.now()}-1`,
-          sku: 'OIL-MAR-1L',
-          productName: 'Marina Coconut Oil 1L x 12 Bottle Case',
-          qty: 35,
-          unit: 'Cases',
-          unitPrice: 3260,
-          warehouseStock: 68,
-          shopStock: 12,
-          vanStock: 6,
-        },
-        {
-          id: `q-${Date.now()}-2`,
-          sku: 'MLK-ANC-400',
-          productName: 'Anchor Full Cream Milk Powder 400g x 24',
-          qty: 20,
-          unit: 'Cartons',
-          unitPrice: 3900,
-          warehouseStock: 14,
-          shopStock: 4,
-          vanStock: 2,
-        },
-      ],
+      items: [],
     };
     setOrders((prev) => [newQuote, ...prev]);
     setQuoteModalOpen(false);
+    setQuoteThreadText('');
+    setQuoteCustomerId('');
     setSelectedOrderId(newId);
     addAiLog({
       module: 'Orders',
-      action: `Drafted Quote ${newId} for ${quoteCustomer} (Rs. 192,100) from thread`,
-      reason: 'Parsed 2 SKUs with current wholesale price list and checked live warehouse stock.',
-      confidence: 96,
-      approvedBy: 'Rohan (Owner)',
-      outcome: 'approved',
+      action: `Created quote ${newId} for ${customer.name} from pasted message`,
+      reason: 'Line items were not parsed. Add items and prices before sending.',
+      approvedBy: 'Owner',
+      outcome: 'flagged',
     });
     addToast({
-      title: `Quote ${newId} Drafted`,
-      description: 'Parsed 2 line items with live stock check.',
-      variant: 'success',
+      title: `Quote ${newId} created`,
+      description: 'Add line items to complete the quote.',
+      variant: 'info',
     });
   };
 
@@ -314,7 +293,7 @@ export function OrdersScreen() {
                 How Transmute Parsed This
               </div>
               <p className="leading-relaxed">
-                Matched customer mobile number, resolved local Singlish/English item names to exact SKUs, applied {activeOrder.customerName} wholesale tier pricing, and checked stock across Peliyagoda Stores, Pettah Shop & Van 1.
+                Items came from the original message. Check quantities and prices before you confirm.
               </p>
             </div>
           </Card>
@@ -323,7 +302,7 @@ export function OrdersScreen() {
           <Card className="xl:col-span-8 p-6 space-y-5">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-semibold text-slate-900 dark:text-white">
-                Parsed Items & Live Stock Check
+                Items & Stock Availability
               </h2>
               <span className="text-xs text-slate-500">{activeOrder.items.length} line items</span>
             </div>
@@ -388,7 +367,7 @@ export function OrdersScreen() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
               <div className="text-xs text-slate-500 flex items-center gap-2">
                 <Package className="w-4 h-4 text-slate-400" />
-                Warehouse picklist & WhatsApp invoice PDF will be generated on confirmation.
+                Confirming this order creates its invoice.
               </div>
               <div className="text-right">
                 <div className="text-xs text-slate-500">Order Total (Rs.)</div>
@@ -512,9 +491,7 @@ export function OrdersScreen() {
                       {order.creditWarning ? (
                         <StatusChip label="Over Credit Limit" tone="red" />
                       ) : (
-                        <span className="text-emerald-700 dark:text-emerald-400 font-medium">
-                          ✓ Stock & Credit OK
-                        </span>
+                        <span className="text-slate-500 dark:text-slate-400">No credit warning</span>
                       )}
                     </td>
                     <td className="px-4 py-3.5 text-right font-semibold tabular-nums text-slate-900 dark:text-white whitespace-nowrap">
@@ -546,7 +523,7 @@ export function OrdersScreen() {
         open={quoteModalOpen}
         onClose={() => setQuoteModalOpen(false)}
         title="Generate Quote from Chat or Email Thread"
-        subtitle="Paste a customer WhatsApp message or email — Transmute extracts SKUs, checks warehouse stock, and prices it automatically."
+        subtitle="Paste the customer's message. Add line items and prices to the quote after it is created."
         footer={
           <>
             <Button variant="secondary" size="sm" onClick={() => setQuoteModalOpen(false)}>
@@ -557,8 +534,9 @@ export function OrdersScreen() {
               size="sm"
               icon={<Plus className="w-4 h-4" />}
               onClick={handleCreateQuoteFromThread}
+              disabled={!quoteCustomerId || !quoteThreadText.trim()}
             >
-              Draft Quote with AI
+              Create Quote
             </Button>
           </>
         }
@@ -569,14 +547,16 @@ export function OrdersScreen() {
               Customer
             </label>
             <select
-              value={quoteCustomer}
-              onChange={(e) => setQuoteCustomer(e.target.value)}
+              value={quoteCustomerId}
+              onChange={(e) => setQuoteCustomerId(e.target.value)}
               className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
             >
-              <option>Gampaha Trade Mart</option>
-              <option>Nugegoda Fresh Mart & Bakery</option>
-              <option>Kandy City Stores</option>
-              <option>Ceylon Spice Kitchen & Catering</option>
+              <option value="">{customers.length ? 'Select a customer' : 'No customers yet'}</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -592,24 +572,6 @@ export function OrdersScreen() {
             />
           </div>
 
-          <div className="p-3.5 rounded-xl bg-[#FFF4EE] dark:bg-[#EA581A]/10 border border-[#FFD5BE] dark:border-[#EA581A]/30 space-y-2 text-xs">
-            <div className="font-semibold text-[#C2410C] dark:text-[#FF9E66] flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5" />
-              AI Live Preview
-            </div>
-            <div className="flex justify-between text-slate-700 dark:text-slate-200">
-              <span>• Marina Coconut Oil 1L x 12 Case (35 × Rs. 3,260)</span>
-              <span className="font-semibold tabular-nums">Rs. 114,100</span>
-            </div>
-            <div className="flex justify-between text-slate-700 dark:text-slate-200">
-              <span>• Anchor Full Cream Milk Powder 400g x 24 (20 × Rs. 3,900)</span>
-              <span className="font-semibold tabular-nums">Rs. 78,000</span>
-            </div>
-            <div className="pt-1.5 border-t border-[#FFD5BE]/70 flex justify-between font-bold text-zinc-900 dark:text-white">
-              <span>Draft Quote Total</span>
-              <span className="tabular-nums">Rs. 192,100</span>
-            </div>
-          </div>
         </div>
       </Modal>
     </div>

@@ -22,26 +22,6 @@ import {
   Supplier,
   ToastItem,
 } from '@/types/erp';
-import {
-  INITIAL_AI_LOGS,
-  INITIAL_AI_SETTINGS,
-  INITIAL_ALERTS,
-  INITIAL_APPROVAL_RULES,
-  INITIAL_BANK_RECON,
-  INITIAL_CATALYST_MESSAGES,
-  INITIAL_COLLECTIONS,
-  INITIAL_CUSTOMERS,
-  INITIAL_DOCUMENTS,
-  INITIAL_GRNS,
-  INITIAL_INVENTORY,
-  INITIAL_LEDGER,
-  INITIAL_ORDERS,
-  INITIAL_PAYMENTS,
-  INITIAL_POS,
-  INITIAL_REPORTS,
-  INITIAL_SUPPLIERS,
-} from '@/data/mockData';
-
 interface ErpContextValue {
   route: NavRoute;
   setRoute: (r: NavRoute) => void;
@@ -108,6 +88,11 @@ interface ErpContextValue {
 
 const ErpContext = createContext<ErpContextValue | null>(null);
 
+// e.g. "14 Apr 2026" — the format used across ERP records.
+function formatErpDate(d: Date): string {
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export function ErpProvider({ children }: { children: React.ReactNode }) {
   const [route, setRoute] = useState<NavRoute>('dashboard');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
@@ -122,23 +107,25 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
   const [aiLogOpen, setAiLogOpen] = useState(false);
   const [pendingReportQuery, setPendingReportQuery] = useState<string | null>(null);
 
-  const [documents, setDocuments] = useState<InboxDocument[]>(INITIAL_DOCUMENTS);
-  const [orders, setOrders] = useState<SalesOrder[]>(INITIAL_ORDERS);
-  const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
-  const [collections, setCollections] = useState<CollectionItem[]>(INITIAL_COLLECTIONS);
-  const [inventory, setInventory] = useState<InventoryItem[]>(INITIAL_INVENTORY);
-  const [suppliers] = useState<Supplier[]>(INITIAL_SUPPLIERS);
-  const [pos, setPos] = useState<PurchaseOrder[]>(INITIAL_POS);
-  const [grns] = useState<GoodsReceivedNote[]>(INITIAL_GRNS);
-  const [ledger, setLedger] = useState<LedgerEntry[]>(INITIAL_LEDGER);
-  const [payments, setPayments] = useState<PaymentRecord[]>(INITIAL_PAYMENTS);
-  const [bankRecon, setBankRecon] = useState<BankReconciliationItem[]>(INITIAL_BANK_RECON);
-  const [alerts, setAlerts] = useState<AnomalyAlert[]>(INITIAL_ALERTS);
-  const [reports, setReports] = useState<ReportResult[]>(INITIAL_REPORTS);
-  const [aiLogs, setAiLogs] = useState<AIActionLogEntry[]>(INITIAL_AI_LOGS);
-  const [catalystMessages, setCatalystMessages] = useState<CatalystMessage[]>(INITIAL_CATALYST_MESSAGES);
-  const [approvalRules, setApprovalRules] = useState<ApprovalRule[]>(INITIAL_APPROVAL_RULES);
-  const [aiSettings, setAiSettings] = useState<AIAutomationSetting[]>(INITIAL_AI_SETTINGS);
+  // All business data starts empty. Records must come from a real data source,
+  // not from seeded demo fixtures.
+  const [documents, setDocuments] = useState<InboxDocument[]>([]);
+  const [orders, setOrders] = useState<SalesOrder[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [collections, setCollections] = useState<CollectionItem[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [suppliers] = useState<Supplier[]>([]);
+  const [pos, setPos] = useState<PurchaseOrder[]>([]);
+  const [grns] = useState<GoodsReceivedNote[]>([]);
+  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [bankRecon, setBankRecon] = useState<BankReconciliationItem[]>([]);
+  const [alerts, setAlerts] = useState<AnomalyAlert[]>([]);
+  const [reports, setReports] = useState<ReportResult[]>([]);
+  const [aiLogs, setAiLogs] = useState<AIActionLogEntry[]>([]);
+  const [catalystMessages, setCatalystMessages] = useState<CatalystMessage[]>([]);
+  const [approvalRules, setApprovalRules] = useState<ApprovalRule[]>([]);
+  const [aiSettings, setAiSettings] = useState<AIAutomationSetting[]>([]);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   useEffect(() => {
@@ -186,13 +173,15 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
   const createDraftPoFromInventory = useCallback(
     (item: InventoryItem) => {
       const qty = item.suggestedReorderQty || Math.max(item.reorderLevel * 2, 50);
-      const poId = `PO-2026-${116 + pos.length}`;
+      const now = new Date();
+      const expected = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const poId = `PO-${now.getFullYear()}-${String(pos.length + 1).padStart(4, '0')}`;
       const newPo: PurchaseOrder = {
         id: poId,
         supplierId: item.preferredSupplierId,
         supplierName: item.preferredSupplierName,
-        createdAt: 'Just now',
-        expectedDate: '17 Apr 2026',
+        createdAt: formatErpDate(now),
+        expectedDate: formatErpDate(expected),
         status: 'draft',
         total: qty * item.unitCost,
         createdByAi: true,
@@ -212,9 +201,9 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       addAiLog({
         module: 'Inventory',
         action: `Created Draft PO ${poId} for ${qty} ${item.unit} of ${item.name}`,
-        reason: `Stock projected to run out in ${item.daysUntilStockout ?? 2} days at ${item.dailyVelocity} ${item.unit}/day velocity.`,
+        reason: `Stock projected to run out in ${item.daysUntilStockout ?? 0} days at ${item.dailyVelocity} ${item.unit}/day velocity.`,
         confidence: 95,
-        approvedBy: 'Rohan (Owner)',
+        approvedBy: 'Owner',
         outcome: 'approved',
       });
       addToast({
@@ -242,13 +231,13 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
           setLedger((prev) => [
             {
               id: `LDG-${Date.now()}`,
-              date: '14 Apr 2026',
+              date: formatErpDate(new Date()),
               description: `Cheque Cleared — CHQ-${payment.chequeNumber} (${payment.invoiceRef})`,
               party: payment.customerName,
               category: 'Sales Receipt',
               type: 'in',
               amount: payment.amount,
-              runningBalance: (prev[0]?.runningBalance ?? 4860000) + payment.amount,
+              runningBalance: (prev[0]?.runningBalance ?? 0) + payment.amount,
               source: 'Cheque Cleared',
             },
             ...prev,
@@ -271,7 +260,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         action: `Reconciled bank line Rs. ${target.amount.toLocaleString()} with ${target.aiSuggestion?.matchRef ?? 'Ledger'}`,
         reason: target.aiSuggestion?.reason ?? 'Manual match approved by owner',
         confidence: target.aiSuggestion?.confidence ?? 100,
-        approvedBy: 'Rohan (Owner)',
+        approvedBy: 'Owner',
         outcome: 'approved',
       });
       addToast({

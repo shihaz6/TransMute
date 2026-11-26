@@ -123,7 +123,7 @@ export function PurchasingScreen() {
               {activePo.grnId ? activePo.grnId : 'Not received yet'}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5">
-              {activePo.grnId ? 'Logged at Main Warehouse' : 'Awaiting physical delivery'}
+              {activePo.grnId ? 'Goods received note recorded' : 'Awaiting physical delivery'}
             </div>
           </Card>
           <Card className="p-4">
@@ -282,7 +282,7 @@ export function PurchasingScreen() {
             <Button
               variant="secondary"
               size="xs"
-              onClick={() => navigateToEntity('documents', 'DOC-9041')}
+              onClick={() => navigateToEntity('documents')}
             >
               Inspect Invoice
             </Button>

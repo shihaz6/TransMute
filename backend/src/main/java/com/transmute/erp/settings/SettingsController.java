@@ -44,6 +44,12 @@ public class SettingsController {
         return service.aiSettings();
     }
 
+    @PostMapping("/ai")
+    @ResponseStatus(HttpStatus.CREATED)
+    public AiAutomationSetting addAiSetting(@Valid @RequestBody AiAutomationSetting body) {
+        return service.addAiSetting(body);
+    }
+
     @PatchMapping("/ai/{id}")
     public AiAutomationSetting setMode(@PathVariable String id, @RequestBody Map<String, String> body) {
         return service.setAiMode(id, body.get("mode"));

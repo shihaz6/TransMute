@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -12,6 +12,7 @@ import {
   Sparkles,
   Store,
 } from 'lucide-react';
+import type { OrderLineInput } from '@/api/erp';
 import { useErp } from '@/context/ErpContext';
 import {
   Button,
@@ -31,12 +32,15 @@ export function OrdersScreen() {
   const {
     orders,
     customers,
-    setOrders,
+    inventory,
     selectedOrderId,
     setSelectedOrderId,
     navigateToEntity,
-    addAiLog,
     addToast,
+    confirmOrder,
+    createOrder,
+    replaceQuoteItems,
+    convertQuote,
   } = useErp();
 
   const [tab, setTab] = useState<'all' | 'whatsapp' | 'quotes' | 'credit-hold'>('all');
@@ -44,11 +48,32 @@ export function OrdersScreen() {
   const [quoteModalOpen, setQuoteModalOpen] = useState(false);
   const [quoteThreadText, setQuoteThreadText] = useState('');
   const [quoteCustomerId, setQuoteCustomerId] = useState('');
+  const [quoteLines, setQuoteLines] = useState<OrderLineInput[]>([]);
+  const [lineSku, setLineSku] = useState('');
+  const [lineQty, setLineQty] = useState('1');
+  const [linePrice, setLinePrice] = useState('');
 
   const activeOrder = useMemo(
     () => orders.find((o) => o.id === selectedOrderId) || null,
     [orders, selectedOrderId]
   );
+
+  // When a quote is opened, its saved lines become the editable list.
+  useEffect(() => {
+    if (activeOrder && activeOrder.type === 'quote') {
+      setQuoteLines(
+        activeOrder.items.map((l) => ({
+          id: l.id,
+          sku: l.sku,
+          productName: l.productName,
+          qty: l.qty,
+          unit: l.unit,
+          unitPrice: l.unitPrice,
+        }))
+      );
+    }
+    // Only reset when a different quote is opened or its saved lines change.
+  }, [activeOrder?.id, activeOrder?.items]);
 
   const filtered = useMemo(() => {
     return orders.filter((o) => {
@@ -67,66 +92,59 @@ export function OrdersScreen() {
   }, [orders, tab, search]);
 
   const handleConfirmAndInvoice = (order: SalesOrder) => {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === order.id ? { ...o, status: 'invoiced', type: 'order' } : o))
-    );
-    addAiLog({
-      module: 'Orders',
-      action: `Confirmed & invoiced ${order.id} for ${order.customerName} (${formatRs(order.total)})`,
-      reason: order.creditWarning
-        ? 'Order exceeded the customer credit limit; owner confirmed it.'
-        : 'Owner confirmed the order.',
-      approvedBy: 'Owner',
-      outcome: 'approved',
-    });
-    addToast({
-      title: `${order.id} confirmed & invoiced`,
-      description: `Invoice created for ${order.customerName}.`,
-      variant: 'success',
-    });
+    void confirmOrder(order.id);
   };
 
-  // Creates a quote record from the pasted text and the chosen customer. Line items
-  // are not parsed automatically yet, so the quote starts with no items and no price.
-  const handleCreateQuoteFromThread = () => {
+  // Creates a quote from the pasted message. Its lines are added afterwards in the quote editor.
+  const handleCreateQuoteFromThread = async () => {
     const customer = customers.find((c) => c.id === quoteCustomerId);
     if (!customer || !quoteThreadText.trim()) return;
-    const now = new Date();
-    const newId = `QT-${now.getTime().toString().slice(-8)}`;
-    const newQuote: SalesOrder = {
-      id: newId,
+    const created = await createOrder({
       type: 'quote',
       customerId: customer.id,
-      customerName: customer.name,
       source: quoteThreadText.toLowerCase().includes('whatsapp') ? 'whatsapp' : 'email',
-      createdAt: now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-      status: 'quote',
-      total: 0,
       originalMessage: {
         sender: customer.contactPerson || customer.name,
         phoneOrEmail: customer.phone,
-        timestamp: now.toLocaleString('en-GB'),
+        timestamp: new Date().toISOString(),
         text: quoteThreadText,
+        voiceTranscript: false,
+        voiceDuration: null,
       },
-      items: [],
-    };
-    setOrders((prev) => [newQuote, ...prev]);
+    });
+    if (!created) return;
     setQuoteModalOpen(false);
     setQuoteThreadText('');
     setQuoteCustomerId('');
-    setSelectedOrderId(newId);
-    addAiLog({
-      module: 'Orders',
-      action: `Created quote ${newId} for ${customer.name} from pasted message`,
-      reason: 'Line items were not parsed. Add items and prices before sending.',
-      approvedBy: 'Owner',
-      outcome: 'flagged',
-    });
-    addToast({
-      title: `Quote ${newId} created`,
-      description: 'Add line items to complete the quote.',
-      variant: 'info',
-    });
+    setSelectedOrderId(created.id);
+  };
+
+  const addQuoteLine = () => {
+    const product = inventory.find((i) => i.sku === lineSku);
+    const qty = Number(lineQty);
+    if (!product || !(qty > 0)) {
+      addToast({ title: 'Choose a product and a quantity', variant: 'warning' });
+      return;
+    }
+    const price = linePrice.trim() === '' ? undefined : Number(linePrice);
+    setQuoteLines((prev) => [
+      ...prev,
+      { sku: product.sku, productName: product.name, qty, unit: product.unit, unitPrice: price },
+    ]);
+    setLineSku('');
+    setLineQty('1');
+    setLinePrice('');
+  };
+
+  const saveQuoteLines = async () => {
+    if (activeOrder) await replaceQuoteItems(activeOrder.id, quoteLines);
+  };
+
+  // Saves the lines first, so the conversion uses what is on screen. Stops if the save fails.
+  const saveAndConvertQuote = async () => {
+    if (!activeOrder) return;
+    const saved = await replaceQuoteItems(activeOrder.id, quoteLines);
+    if (saved) await convertQuote(activeOrder.id);
   };
 
   const statusChip = (status: OrderStatus) => {
@@ -203,7 +221,7 @@ export function OrdersScreen() {
             >
               View Customer
             </Button>
-            {activeOrder.status !== 'invoiced' && activeOrder.status !== 'dispatched' && (
+            {activeOrder.type === 'order' && activeOrder.status !== 'invoiced' && activeOrder.status !== 'dispatched' && (
               <Button
                 variant="gold"
                 size="sm"
@@ -306,6 +324,78 @@ export function OrdersScreen() {
               </h2>
               <span className="text-xs text-slate-500">{activeOrder.items.length} line items</span>
             </div>
+
+            {activeOrder.type === 'quote' && (
+              <div className="p-4 rounded-xl border border-[#FFD5BE] dark:border-[#EA581A]/30 bg-[#FFF4EE]/60 dark:bg-[#EA581A]/10 space-y-3">
+                <div className="text-xs font-semibold text-[#C2410C] dark:text-[#FF9E66]">Quote lines</div>
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
+                  <select
+                    value={lineSku}
+                    onChange={(e) => setLineSku(e.target.value)}
+                    className="md:col-span-6 px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+                  >
+                    <option value="">Select a product</option>
+                    {inventory.map((item) => (
+                      <option key={item.sku} value={item.sku}>
+                        {item.name} ({item.sku})
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={1}
+                    value={lineQty}
+                    onChange={(e) => setLineQty(e.target.value)}
+                    placeholder="Qty"
+                    className="md:col-span-2 px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={linePrice}
+                    onChange={(e) => setLinePrice(e.target.value)}
+                    placeholder="Price (optional)"
+                    className="md:col-span-2 px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+                  />
+                  <Button variant="secondary" size="sm" className="md:col-span-2" onClick={addQuoteLine}>
+                    Add line
+                  </Button>
+                </div>
+                {quoteLines.length === 0 ? (
+                  <p className="text-xs text-slate-500">No lines yet. Add the products the customer asked for.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {quoteLines.map((line, idx) => (
+                      <li key={idx} className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-200">
+                        <span>
+                          {line.productName} · {line.qty} {line.unit}
+                          {line.unitPrice !== undefined ? ` @ ${formatRs(line.unitPrice)}` : ' (default price)'}
+                        </span>
+                        <button
+                          onClick={() => setQuoteLines((prev) => prev.filter((_, i) => i !== idx))}
+                          className="text-red-600 hover:underline cursor-pointer"
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="flex items-center justify-end gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => void saveQuoteLines()}>
+                    Save lines
+                  </Button>
+                  <Button
+                    variant="gold"
+                    size="sm"
+                    disabled={quoteLines.length === 0}
+                    onClick={() => void saveAndConvertQuote()}
+                  >
+                    Convert to order
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
               <table className="w-full text-left text-xs">

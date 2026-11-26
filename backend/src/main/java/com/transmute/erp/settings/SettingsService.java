@@ -53,6 +53,17 @@ public class SettingsService {
         return aiSettings.findAll();
     }
 
+    public AiAutomationSetting addAiSetting(AiAutomationSetting input) {
+        if (input.getMode() == null || !MODES.contains(input.getMode())) {
+            throw new BadRequestException("mode must be auto-post or always-review");
+        }
+        input.setId(Ids.next("AI"));
+        AiAutomationSetting saved = aiSettings.save(input);
+        audit.record("Settings", "Added AI automation for " + saved.getTask(),
+                saved.getDescription(), null, "Owner", "approved");
+        return saved;
+    }
+
     public AiAutomationSetting setAiMode(String id, String mode) {
         if (!MODES.contains(mode)) {
             throw new BadRequestException("mode must be auto-post or always-review");

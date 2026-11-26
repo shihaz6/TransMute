@@ -13,6 +13,7 @@ import com.jayway.jsonpath.JsonPath;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -35,9 +36,16 @@ import org.springframework.test.web.servlet.MvcResult;
 class ValidationAndRulesTest {
 
     private static final MediaType JSON = MediaType.APPLICATION_JSON;
+    private static final String SHARED_SKU = "SHARED-SKU";
 
     @Autowired
     private MockMvc mvc;
+
+    /** Order helpers refer to this SKU, so it must exist before each test. Repeats are ignored. */
+    @BeforeEach
+    void ensureSharedSku() throws Exception {
+        mvc.perform(post("/api/inventory").contentType(JSON).content(itemJson(SHARED_SKU, 50, 0)));
+    }
 
     // ---------- Customers ----------
 
@@ -165,6 +173,120 @@ class ValidationAndRulesTest {
                         .content(orderJson(customer, "order", 1000, 150)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("confirmed"));
+    }
+
+    @Test
+    void orderLinesTakeStockAndDefaultPriceFromInventory() throws Exception {
+        String customer = createCustomer("Stock Lookup Shop", "0");
+        String sku = unique("LK");
+        createItem(sku, 7, 0); // salePrice 150, warehouse 7
+        mvc.perform(post("/api/orders").contentType(JSON)
+                        .content("{\"type\":\"order\",\"customerId\":\"" + customer + "\",\"items\":[{\"sku\":\""
+                                + sku + "\",\"qty\":2}]}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.total").value(300))
+                .andExpect(jsonPath("$.items[0].unitPrice").value(150))
+                .andExpect(jsonPath("$.items[0].warehouseStock").value(7))
+                .andExpect(jsonPath("$.items[0].productName").value("Item " + sku));
+    }
+
+    @Test
+    void orderLineWithUnknownSkuIsRejected() throws Exception {
+        String customer = createCustomer("Unknown SKU Shop", "0");
+        mvc.perform(post("/api/orders").contentType(JSON)
+                        .content("{\"type\":\"order\",\"customerId\":\"" + customer + "\",\"items\":[{\"sku\":\"NOPE-1\",\"qty\":1}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Unknown SKU: NOPE-1"));
+    }
+
+    @Test
+    void orderLineQuantityMustBePositive() throws Exception {
+        String customer = createCustomer("Zero Qty Shop", "0");
+        String sku = unique("ZQ");
+        createItem(sku, 1, 0);
+        mvc.perform(post("/api/orders").contentType(JSON)
+                        .content("{\"type\":\"order\",\"customerId\":\"" + customer + "\",\"items\":[{\"sku\":\""
+                                + sku + "\",\"qty\":0}]}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void quoteCanHoldFreeTextLines() throws Exception {
+        String customer = createCustomer("Free Text Quote Shop", "0");
+        mvc.perform(post("/api/orders").contentType(JSON)
+                        .content("{\"type\":\"quote\",\"customerId\":\"" + customer + "\",\"items\":[{\"productName\":\"Mystery item\",\"qty\":3,\"unitPrice\":10}]}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("quote"))
+                .andExpect(jsonPath("$.total").value(30));
+    }
+
+    @Test
+    void quoteLinesCanBeReplaced() throws Exception {
+        String customer = createCustomer("Edit Quote Shop", "0");
+        String sku = unique("EQ");
+        createItem(sku, 4, 0);
+        String quote = idOf(mvc.perform(post("/api/orders").contentType(JSON)
+                        .content("{\"type\":\"quote\",\"customerId\":\"" + customer + "\"}"))
+                .andExpect(status().isCreated())
+                .andReturn());
+        mvc.perform(put("/api/orders/" + quote + "/items").contentType(JSON)
+                        .content("[{\"sku\":\"" + sku + "\",\"qty\":5}]"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(750))
+                .andExpect(jsonPath("$.items.length()").value(1));
+    }
+
+    @Test
+    void onlyQuotesHaveTheirLinesReplaced() throws Exception {
+        String customer = createCustomer("Order Lines Shop", "0");
+        String sku = unique("OL");
+        createItem(sku, 4, 0);
+        String order = idOf(mvc.perform(post("/api/orders").contentType(JSON)
+                        .content("{\"type\":\"order\",\"customerId\":\"" + customer + "\",\"items\":[{\"sku\":\""
+                                + sku + "\",\"qty\":1}]}"))
+                .andReturn());
+        mvc.perform(put("/api/orders/" + order + "/items").contentType(JSON).content("[]"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Only quotes can be edited line by line"));
+    }
+
+    @Test
+    void quoteConvertsToOrderOnceAndOnlyWithItems() throws Exception {
+        String customer = createCustomer("Convert Shop", "0");
+        String empty = idOf(mvc.perform(post("/api/orders").contentType(JSON)
+                        .content("{\"type\":\"quote\",\"customerId\":\"" + customer + "\"}"))
+                .andReturn());
+        mvc.perform(post("/api/orders/" + empty + "/convert"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Add line items to the quote before converting it"));
+
+        String sku = unique("CV");
+        createItem(sku, 2, 0);
+        mvc.perform(put("/api/orders/" + empty + "/items").contentType(JSON)
+                        .content("[{\"sku\":\"" + sku + "\",\"qty\":1}]"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/orders/" + empty + "/convert"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("order"))
+                .andExpect(jsonPath("$.status").value("confirmed"));
+        mvc.perform(post("/api/orders/" + empty + "/convert"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Only quotes can be converted to orders"));
+    }
+
+    @Test
+    void aiSettingNeedsATaskAndAValidMode() throws Exception {
+        mvc.perform(post("/api/settings/ai").contentType(JSON)
+                        .content("{\"task\":\"\",\"mode\":\"auto-post\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fields.task").exists());
+        mvc.perform(post("/api/settings/ai").contentType(JSON)
+                        .content("{\"task\":\"Post invoices\",\"mode\":\"sometimes\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/settings/ai").contentType(JSON)
+                        .content("{\"task\":\"Post invoices\",\"description\":\"Auto-post matched bills\",\"mode\":\"auto-post\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.mode").value("auto-post"));
     }
 
     @Test
@@ -783,7 +905,7 @@ class ValidationAndRulesTest {
 
     private static String orderJson(String customerId, String type, int qty, int unitPrice) {
         return "{\"type\":\"" + type + "\",\"customerId\":\"" + customerId + "\",\"source\":\"walk-in\","
-                + "\"items\":[{\"id\":\"l1\",\"sku\":\"SKU-X\",\"productName\":\"Thing\",\"qty\":" + qty
+                + "\"items\":[{\"id\":\"l1\",\"sku\":\"" + SHARED_SKU + "\",\"productName\":\"Thing\",\"qty\":" + qty
                 + ",\"unit\":\"Cases\",\"unitPrice\":" + unitPrice
                 + ",\"warehouseStock\":0,\"shopStock\":0,\"vanStock\":0}]}";
     }

@@ -77,10 +77,11 @@ const INITIAL_MATRIX: Record<string, Record<string, boolean>> = {
 export function SettingsScreen() {
   const {
     approvalRules,
-    setApprovalRules,
     aiSettings,
-    setAiSettings,
     addToast,
+    setApprovalRuleActive,
+    addApprovalRule,
+    setAiMode,
   } = useErp();
 
   const [tab, setTab] = useState<'roles' | 'approvals' | 'ai' | 'channels'>('roles');
@@ -104,45 +105,24 @@ export function SettingsScreen() {
   };
 
   const toggleRule = (id: string) => {
-    setApprovalRules((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, active: !r.active } : r))
-    );
+    const rule = approvalRules.find((r) => r.id === id);
+    if (rule) void setApprovalRuleActive(id, !rule.active);
   };
 
   const addRule = () => {
     if (!newRuleName.trim() || !newRuleCondition.trim()) return;
-    setApprovalRules((prev) => [
-      ...prev,
-      {
-        id: `RULE-${Date.now()}`,
-        name: newRuleName.trim(),
-        condition: newRuleCondition.trim(),
-        approver: newRuleApprover,
-        active: true,
-      },
-    ]);
+    void addApprovalRule({
+      name: newRuleName.trim(),
+      condition: newRuleCondition.trim(),
+      approver: newRuleApprover,
+    });
     setRuleModalOpen(false);
     setNewRuleName('');
     setNewRuleCondition('');
-    addToast({
-      title: 'Approval rule added',
-      description: 'Transmute will enforce this rule immediately.',
-      variant: 'success',
-    });
   };
 
   const toggleAiMode = (id: string, mode: 'auto-post' | 'always-review') => {
-    setAiSettings((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, mode } : s))
-    );
-    addToast({
-      title: 'AI Automation Control Updated',
-      description:
-        mode === 'auto-post'
-          ? 'AI may execute automatically when confidence thresholds are met.'
-          : 'AI will always pause and request human approval first.',
-      variant: 'info',
-    });
+    void setAiMode(id, mode);
   };
 
   // Team members are added by the owner; none are seeded.

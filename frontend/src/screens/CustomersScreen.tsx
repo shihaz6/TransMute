@@ -24,6 +24,11 @@ import {
 import { Customer, PaymentRisk } from '@/types/erp';
 import { formatRs } from '@/utils/format';
 
+// Credit utilisation as a whole percentage; 0 when no credit limit is set.
+function utilisationPct(balance: number, limit: number): number {
+  return limit > 0 ? Math.round((balance / limit) * 100) : 0;
+}
+
 export function CustomersScreen() {
   const {
     customers,
@@ -65,7 +70,7 @@ export function CustomersScreen() {
 
   // Customer Detail View
   if (activeCustomer) {
-    const util = Math.round((activeCustomer.outstandingBalance / activeCustomer.creditLimit) * 100);
+    const util = utilisationPct(activeCustomer.outstandingBalance, activeCustomer.creditLimit);
     const timeline = activeCustomer.timeline.filter(
       (ev) => timelineFilter === 'all' || ev.type === timelineFilter
     );
@@ -359,7 +364,7 @@ export function CustomersScreen() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                 {filtered.map((c: Customer) => {
-                  const util = Math.round((c.outstandingBalance / c.creditLimit) * 100);
+                  const util = utilisationPct(c.outstandingBalance, c.creditLimit);
                   return (
                     <tr
                       key={c.id}

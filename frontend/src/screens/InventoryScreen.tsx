@@ -72,7 +72,7 @@ export function InventoryScreen() {
     <div className="space-y-6">
       <PageHeader
         title="Inventory & Multi-Location Stock"
-        subtitle="Live stock counts across Peliyagoda Stores, Pettah Shop, and Delivery Van 1 with AI-powered reorder suggestions."
+        subtitle="Stock counts across the warehouse, shop and delivery van, with reorder suggestions."
         actions={
           <Button variant="secondary" size="sm" onClick={() => setRoute('purchasing')}>
             View Draft POs <ArrowRight className="w-3.5 h-3.5" />
@@ -92,21 +92,21 @@ export function InventoryScreen() {
             <Building2 className="w-3.5 h-3.5 text-slate-400" /> Main Warehouse
           </div>
           <div className="text-xl font-bold mt-1 tabular-nums">{whUnits.toLocaleString()} units</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Peliyagoda Main Stores</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Units across all items</div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-slate-500 flex items-center gap-1.5">
             <Store className="w-3.5 h-3.5 text-[#EA581A]" /> Main Shop
           </div>
           <div className="text-xl font-bold mt-1 tabular-nums">{shopUnits.toLocaleString()} units</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Pettah Main Street Counter</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Units across all items</div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-slate-500 flex items-center gap-1.5">
-            <Truck className="w-3.5 h-3.5 text-emerald-500" /> Delivery Van 1
+            <Truck className="w-3.5 h-3.5 text-emerald-500" /> Delivery Van
           </div>
           <div className="text-xl font-bold mt-1 tabular-nums">{vanUnits.toLocaleString()} units</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Active Route: Nugegoda / Maharagama</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Units across all items</div>
         </Card>
       </div>
 
@@ -240,7 +240,7 @@ export function InventoryScreen() {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                 {filtered.map((item) => {
                   const total = item.warehouseStock + item.shopStock + item.vanStock;
-                  const ratio = total / item.reorderLevel;
+                  const ratio = item.reorderLevel > 0 ? total / item.reorderLevel : 1;
                   const status =
                     ratio <= 0.5 ? 'Critical' : ratio <= 1 ? 'Low' : 'Healthy';
                   return (

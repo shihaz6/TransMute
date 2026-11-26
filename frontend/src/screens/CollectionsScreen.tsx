@@ -36,9 +36,9 @@ export function CollectionsScreen() {
 
   const changeTone = (item: CollectionItem, tone: CollectionItem['tone']) => {
     const templates = {
-      friendly: `Ayubowan ${item.contactPerson} sir,\n\nHope business is going well! Gentle reminder from Lanka Crest Wholesale that invoices ${item.invoiceRefs.join(', ')} (${formatRs(item.overdueAmount)}) are now ${item.daysOverdue} days past the credit period.\n\nKindly share the ComBank / CEFTS slip at your convenience. Bohoma Sthuthi!`,
-      firm: `Dear ${item.contactPerson} sir,\n\nYour overdue balance of ${formatRs(item.overdueAmount)} (${item.invoiceRefs.join(', ')}) is now ${item.daysOverdue} days overdue.\n\nPlease settle at least 50% via ComBank CEFTS / JustPay today so upcoming lorry deliveries aren't held up. Thank you — Lanka Crest Wholesale.`,
-      final: `Dear ${item.contactPerson} sir,\n\nFinal reminder before credit hold: ${formatRs(item.overdueAmount)} against ${item.invoiceRefs.join(', ')} has been pending for ${item.daysOverdue} days.\n\nKindly confirm an exact settlement date today to avoid pausing credit dispatches. Lanka Crest Wholesale (Pvt) Ltd.`,
+      friendly: `Hello ${item.contactPerson},\n\nHope business is going well! Gentle reminder that invoices ${item.invoiceRefs.join(', ')} (${formatRs(item.overdueAmount)}) are now ${item.daysOverdue} days past the credit period.\n\nKindly share the payment slip at your convenience. Thank you!`,
+      firm: `Dear ${item.contactPerson},\n\nYour overdue balance of ${formatRs(item.overdueAmount)} (${item.invoiceRefs.join(', ')}) is now ${item.daysOverdue} days overdue.\n\nPlease settle at least 50% today so upcoming deliveries aren't held up. Thank you.`,
+      final: `Dear ${item.contactPerson},\n\nFinal reminder before credit hold: ${formatRs(item.overdueAmount)} against ${item.invoiceRefs.join(', ')} has been pending for ${item.daysOverdue} days.\n\nKindly confirm an exact settlement date today to avoid pausing credit dispatches.`,
     };
     setCollections((prev) =>
       prev.map((c) =>
@@ -60,7 +60,7 @@ export function CollectionsScreen() {
       action: `Sent approved WhatsApp reminder to ${item.customerName} (${formatRs(item.overdueAmount)})`,
       reason: `Account ${item.daysOverdue} days overdue; owner reviewed & approved ${item.tone} WhatsApp message.`,
       confidence: 96,
-      approvedBy: 'Rohan (Owner)',
+      approvedBy: 'Owner',
       outcome: 'approved',
     });
     addToast({
@@ -71,22 +71,28 @@ export function CollectionsScreen() {
   };
 
   const handleMarkPromised = (item: CollectionItem) => {
+    // Default follow-up is one week out; the owner can adjust it in the record.
+    const followUp = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
     setCollections((prev) =>
       prev.map((c) =>
         c.id === item.id
           ? {
               ...c,
               status: 'promised',
-              promisedDate: '18 Apr 2026',
+              promisedDate: followUp,
               promisedAmount: Math.round(item.overdueAmount * 0.5),
-              scheduledFor: 'Follow-up 18 Apr',
+              scheduledFor: `Follow-up ${followUp}`,
             }
           : c
       )
     );
     addToast({
       title: 'Promise to Pay Recorded',
-      description: `${item.customerName} scheduled for follow-up on 18 Apr.`,
+      description: `${item.customerName} scheduled for follow-up on ${followUp}.`,
       variant: 'info',
     });
   };
@@ -115,11 +121,11 @@ export function CollectionsScreen() {
           <div className="text-[11px] text-slate-400 mt-0.5">{collections.length} overdue accounts</div>
         </Card>
         <Card className="p-4">
-          <div className="text-xs text-slate-500">Promised This Week</div>
+          <div className="text-xs text-slate-500">Promised to Pay</div>
           <div className="text-2xl font-bold mt-1 tabular-nums text-emerald-700 dark:text-emerald-400">
             {formatRs(totalPromised)}
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Auto-tracked against bank feed</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">From recorded promises</div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-slate-500">Queued for Owner Approval</div>
@@ -158,6 +164,11 @@ export function CollectionsScreen() {
       {/* Board Split: Left Overdue Cards, Right WhatsApp Reminder Editor & Preview */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         <div className="xl:col-span-5 space-y-3">
+          {filtered.length === 0 && (
+            <Card className="p-6 text-center text-xs text-slate-500">
+              No overdue accounts on the board.
+            </Card>
+          )}
           {filtered.map((item) => {
             const isSelected = selected?.id === item.id;
             return (

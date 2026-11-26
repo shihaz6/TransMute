@@ -11,9 +11,17 @@ import { useErp } from '@/context/ErpContext';
 import { Button, Card, cn, PageHeader, StatusChip } from '@/components/ui/Primitives';
 import { CollectionItem, ReminderStatus } from '@/types/erp';
 import { formatRs } from '@/utils/format';
+import { isoDaysFromToday } from '@/utils/dates';
 
 export function CollectionsScreen() {
-  const { collections, setCollections, addAiLog, addToast, navigateToEntity } = useErp();
+  const {
+    collections,
+    navigateToEntity,
+    updateCollectionDraft,
+    changeCollectionTone,
+    sendCollectionReminder,
+    recordPromise,
+  } = useErp();
   const [selectedId, setSelectedId] = useState<string>(collections[0]?.id || '');
   const [statusFilter, setStatusFilter] = useState<'all' | ReminderStatus>('all');
 
@@ -28,73 +36,30 @@ export function CollectionsScreen() {
     .filter((c) => c.status === 'promised')
     .reduce((s, c) => s + (c.promisedAmount || c.overdueAmount), 0);
 
-  const updateDraftMessage = (id: string, msg: string) => {
-    setCollections((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, draftMessage: msg } : c))
-    );
+  // The draft is edited locally and saved when the textarea loses focus, so typing does not
+  // send a request for every keystroke.
+  const [draftEdit, setDraftEdit] = useState<{ id: string; text: string } | null>(null);
+  const shownDraft =
+    selected && draftEdit && draftEdit.id === selected.id ? draftEdit.text : selected?.draftMessage ?? '';
+
+  const saveDraft = () => {
+    if (selected && draftEdit && draftEdit.id === selected.id && draftEdit.text !== selected.draftMessage) {
+      void updateCollectionDraft(selected.id, draftEdit.text);
+    }
+    setDraftEdit(null);
   };
 
   const changeTone = (item: CollectionItem, tone: CollectionItem['tone']) => {
-    const templates = {
-      friendly: `Hello ${item.contactPerson},\n\nHope business is going well! Gentle reminder that invoices ${item.invoiceRefs.join(', ')} (${formatRs(item.overdueAmount)}) are now ${item.daysOverdue} days past the credit period.\n\nKindly share the payment slip at your convenience. Thank you!`,
-      firm: `Dear ${item.contactPerson},\n\nYour overdue balance of ${formatRs(item.overdueAmount)} (${item.invoiceRefs.join(', ')}) is now ${item.daysOverdue} days overdue.\n\nPlease settle at least 50% today so upcoming deliveries aren't held up. Thank you.`,
-      final: `Dear ${item.contactPerson},\n\nFinal reminder before credit hold: ${formatRs(item.overdueAmount)} against ${item.invoiceRefs.join(', ')} has been pending for ${item.daysOverdue} days.\n\nKindly confirm an exact settlement date today to avoid pausing credit dispatches.`,
-    };
-    setCollections((prev) =>
-      prev.map((c) =>
-        c.id === item.id ? { ...c, tone, draftMessage: templates[tone] } : c
-      )
-    );
+    void changeCollectionTone(item.id, tone);
   };
 
   const handleApproveAndSend = (item: CollectionItem) => {
-    setCollections((prev) =>
-      prev.map((c) =>
-        c.id === item.id
-          ? { ...c, status: 'sent', lastContacted: 'Just now', scheduledFor: 'Sent today' }
-          : c
-      )
-    );
-    addAiLog({
-      module: 'Collections',
-      action: `Sent approved WhatsApp reminder to ${item.customerName} (${formatRs(item.overdueAmount)})`,
-      reason: `Account ${item.daysOverdue} days overdue; owner reviewed & approved ${item.tone} WhatsApp message.`,
-      confidence: 96,
-      approvedBy: 'Owner',
-      outcome: 'approved',
-    });
-    addToast({
-      title: 'WhatsApp Reminder Sent',
-      description: `Delivered to ${item.contactPerson} (${item.phone})`,
-      variant: 'success',
-    });
+    void sendCollectionReminder(item.id);
   };
 
   const handleMarkPromised = (item: CollectionItem) => {
     // Default follow-up is one week out; the owner can adjust it in the record.
-    const followUp = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-    setCollections((prev) =>
-      prev.map((c) =>
-        c.id === item.id
-          ? {
-              ...c,
-              status: 'promised',
-              promisedDate: followUp,
-              promisedAmount: Math.round(item.overdueAmount * 0.5),
-              scheduledFor: `Follow-up ${followUp}`,
-            }
-          : c
-      )
-    );
-    addToast({
-      title: 'Promise to Pay Recorded',
-      description: `${item.customerName} scheduled for follow-up on ${followUp}.`,
-      variant: 'info',
-    });
+    void recordPromise(item.id, undefined, isoDaysFromToday(7));
   };
 
   const statusChip = (status: ReminderStatus) => {
@@ -272,8 +237,9 @@ export function CollectionsScreen() {
               </label>
               <textarea
                 rows={6}
-                value={selected.draftMessage}
-                onChange={(e) => updateDraftMessage(selected.id, e.target.value)}
+                value={shownDraft}
+                onChange={(e) => setDraftEdit({ id: selected.id, text: e.target.value })}
+                onBlur={saveDraft}
                 className="w-full p-3.5 text-xs rounded-xl bg-stone-50 dark:bg-zinc-950 border border-stone-200 dark:border-zinc-800 focus:outline-none focus:border-[#EA581A] leading-relaxed text-zinc-800 dark:text-zinc-100"
               />
             </div>
@@ -285,7 +251,7 @@ export function CollectionsScreen() {
                 WhatsApp Recipient Preview
               </div>
               <div className="ml-auto max-w-md rounded-2xl rounded-tr-sm bg-[#DCF8C6] dark:bg-emerald-950/90 border border-emerald-200/80 dark:border-emerald-800/70 p-3.5 text-xs text-slate-900 dark:text-emerald-50 whitespace-pre-line shadow-xs leading-relaxed">
-                {selected.draftMessage}
+                {shownDraft}
                 <div className="flex items-center justify-end gap-1 mt-1.5 text-[10px] text-slate-500 dark:text-emerald-300/70">
                   <span>Ready to send</span>
                   <CheckCheck className="w-3 h-3 text-sky-500" />

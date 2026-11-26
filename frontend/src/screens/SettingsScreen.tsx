@@ -24,7 +24,7 @@ import {
 const ROLES = ['Owner', 'Sales Manager', 'Accounts', 'Warehouse Lead', 'Van Driver'] as const;
 const PERMISSIONS = [
   'View Profit & Margins',
-  'Approve Invoices > Rs. 100k',
+  'Approve high-value invoices',
   'Override Credit Limits',
   'Edit Product Prices',
   'Adjust Warehouse Stock',
@@ -34,7 +34,7 @@ const PERMISSIONS = [
 const INITIAL_MATRIX: Record<string, Record<string, boolean>> = {
   Owner: {
     'View Profit & Margins': true,
-    'Approve Invoices > Rs. 100k': true,
+    'Approve high-value invoices': true,
     'Override Credit Limits': true,
     'Edit Product Prices': true,
     'Adjust Warehouse Stock': true,
@@ -42,7 +42,7 @@ const INITIAL_MATRIX: Record<string, Record<string, boolean>> = {
   },
   'Sales Manager': {
     'View Profit & Margins': false,
-    'Approve Invoices > Rs. 100k': false,
+    'Approve high-value invoices': false,
     'Override Credit Limits': false,
     'Edit Product Prices': true,
     'Adjust Warehouse Stock': false,
@@ -50,7 +50,7 @@ const INITIAL_MATRIX: Record<string, Record<string, boolean>> = {
   },
   Accounts: {
     'View Profit & Margins': true,
-    'Approve Invoices > Rs. 100k': false,
+    'Approve high-value invoices': false,
     'Override Credit Limits': false,
     'Edit Product Prices': false,
     'Adjust Warehouse Stock': false,
@@ -58,7 +58,7 @@ const INITIAL_MATRIX: Record<string, Record<string, boolean>> = {
   },
   'Warehouse Lead': {
     'View Profit & Margins': false,
-    'Approve Invoices > Rs. 100k': false,
+    'Approve high-value invoices': false,
     'Override Credit Limits': false,
     'Edit Product Prices': false,
     'Adjust Warehouse Stock': true,
@@ -66,7 +66,7 @@ const INITIAL_MATRIX: Record<string, Record<string, boolean>> = {
   },
   'Van Driver': {
     'View Profit & Margins': false,
-    'Approve Invoices > Rs. 100k': false,
+    'Approve high-value invoices': false,
     'Override Credit Limits': false,
     'Edit Product Prices': false,
     'Adjust Warehouse Stock': false,
@@ -88,7 +88,7 @@ export function SettingsScreen() {
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [newRuleName, setNewRuleName] = useState('');
   const [newRuleCondition, setNewRuleCondition] = useState('');
-  const [newRuleApprover, setNewRuleApprover] = useState('Owner (Rohan)');
+  const [newRuleApprover, setNewRuleApprover] = useState('Owner');
 
   const togglePerm = (role: string, perm: string) => {
     if (role === 'Owner') return;
@@ -145,19 +145,14 @@ export function SettingsScreen() {
     });
   };
 
-  const team = [
-    { name: 'Rohan Perera', role: 'Owner', phone: '+94 77 410 0221', status: 'Active' },
-    { name: 'Nimali Jayawardena', role: 'Accounts', phone: '+94 71 889 0123', status: 'Active' },
-    { name: 'Kasun Fernando', role: 'Sales Manager', phone: '+94 77 412 0987', status: 'Active' },
-    { name: 'Chaminda Silva', role: 'Warehouse Lead', phone: '+94 76 552 1009', status: 'Active' },
-    { name: 'Pradeep Kumara', role: 'Van Driver', phone: '+94 71 771 2034', status: 'Active' },
-  ];
+  // Team members are added by the owner; none are seeded.
+  const team: { name: string; role: string; phone: string; status: string }[] = [];
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Settings & Governance"
-        subtitle="Control staff permissions, owner approval thresholds, AI autonomy guardrails, and WhatsApp/email connections."
+        subtitle="Control staff permissions, owner approval rules, AI autonomy guardrails, and WhatsApp, email and bank connections."
       />
 
       <div className="flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-800 pb-3 flex-wrap">
@@ -192,6 +187,9 @@ export function SettingsScreen() {
               Team Members ({team.length})
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              {team.length === 0 && (
+                <p className="text-xs text-slate-500 col-span-full">No team members added yet.</p>
+              )}
               {team.map((u) => (
                 <div
                   key={u.name}
@@ -382,23 +380,23 @@ export function SettingsScreen() {
             {
               icon: <MessageSquare className="w-5 h-5 text-emerald-600" />,
               name: 'WhatsApp Business API',
-              endpoint: '+94 77 410 0221 (Lanka Crest Wholesale)',
+              endpoint: 'Not configured',
               desc: 'Receives customer text & voice-note orders, supplier bill photos, and sends approved payment reminders.',
-              status: 'Connected · Synced 1m ago',
+              status: 'Not connected',
             },
             {
               icon: <Mail className="w-5 h-5 text-sky-600" />,
               name: 'Supplier Bills Email Inbox',
-              endpoint: 'bills@lankacrest.lk',
+              endpoint: 'Not configured',
               desc: 'Automatically parses PDF invoices and email quote requests into Document Inbox & Orders.',
-              status: 'Connected · 18 emails today',
+              status: 'Not connected',
             },
             {
               icon: <Landmark className="w-5 h-5 text-[#EA581A]" />,
-              name: 'Commercial Bank Business Feed',
-              endpoint: 'A/C ····8821-01 (CEFTS & JustPay)',
+              name: 'Bank Statement Feed',
+              endpoint: 'Not configured',
               desc: 'Pulls daily statements for 1-click AI reconciliation against customer invoices and supplier payments.',
-              status: 'Connected · Updated 09:00 AM',
+              status: 'Not connected',
             },
           ].map((ch) => (
             <Card key={ch.name} className="p-5 flex flex-col justify-between space-y-4">
@@ -407,7 +405,7 @@ export function SettingsScreen() {
                   <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
                     {ch.icon}
                   </div>
-                  <StatusChip label="Connected" tone="green" />
+                  <StatusChip label="Not connected" tone="slate" />
                 </div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{ch.name}</h3>
                 <div className="text-xs font-mono text-slate-500 mt-1">{ch.endpoint}</div>
@@ -469,7 +467,7 @@ export function SettingsScreen() {
             <Input
               value={newRuleCondition}
               onChange={(e) => setNewRuleCondition(e.target.value)}
-              placeholder="e.g. Any sales quote with >5% discount or order > Rs. 500,000"
+              placeholder="e.g. Any sales quote with a discount above 5%"
             />
           </div>
           <div>
@@ -481,7 +479,7 @@ export function SettingsScreen() {
               onChange={(e) => setNewRuleApprover(e.target.value)}
               className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
             >
-              <option>Owner (Rohan)</option>
+              <option>Owner</option>
               <option>Owner + Accounts Manager</option>
               <option>Sales Manager</option>
             </select>

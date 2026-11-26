@@ -11,6 +11,7 @@ import type {
   CatalystMessageDto,
   CollectionItemDto,
   CustomerDto,
+  DailyHaikuDto,
   DashboardSummaryDto,
   GoodsReceivedNoteDto,
   InboxDocumentDto,
@@ -176,4 +177,5 @@ export const erpApi = {
   // Reports and dashboard
   report: (kind: 'receivables' | 'stock' | 'purchase-orders') => apiGet<ReportViewDto>(`/api/reports/${kind}`),
   dashboard: () => apiGet<DashboardSummaryDto>('/api/dashboard'),
+  dailyHaiku: () => apiGet<DailyHaikuDto>('/api/haiku'),
 };

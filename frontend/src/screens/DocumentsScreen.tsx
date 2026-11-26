@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -9,7 +9,6 @@ import {
   FileText,
   Mail,
   MessageSquare,
-  RefreshCw,
   ShieldAlert,
   Sparkles,
   Upload,
@@ -26,7 +25,6 @@ import {
   EmptyState,
   PageHeader,
   SearchInput,
-  SkeletonBlock,
   StatusChip,
 } from '@/components/ui/Primitives';
 import { DocChannel, DocStatus, InboxDocument } from '@/types/erp';
@@ -46,7 +44,7 @@ export function DocumentsScreen() {
   const [channelFilter, setChannelFilter] = useState<'all' | DocChannel>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | DocStatus>('all');
   const [search, setSearch] = useState('');
-  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [zoom, setZoom] = useState(100);
@@ -73,71 +71,61 @@ export function DocumentsScreen() {
     });
   }, [documents, channelFilter, statusFilter, search]);
 
-  const simulateUpload = (channel: DocChannel = 'upload') => {
-    setUploading(true);
-    setTimeout(() => {
-      const newId = `DOC-${9042 + documents.length}`;
-      const newDoc: InboxDocument = {
-        id: newId,
-        fileName:
-          channel === 'whatsapp'
-            ? 'WhatsApp_Photo_MataleSpices_419.jpg'
-            : 'Uploaded_Invoice_MarinaOils_8892.pdf',
-        docType: 'Supplier Invoice',
-        channel,
-        receivedAt: 'Just now',
-        sender: channel === 'whatsapp' ? '+94 77 491 8201 (WhatsApp)' : 'Uploaded by Rohan (Owner)',
-        status: 'needs-review',
-        overallConfidence: 87,
-        isPhoto: channel === 'whatsapp',
-        supplier: { value: 'Matale Spice & Curry Mills', confidence: 97 },
-        invoiceNumber: { value: 'MSC-2026-419', confidence: 94 },
-        invoiceDate: { value: '14 Apr 2026', confidence: 96 },
-        dueDate: { value: '28 Apr 2026', confidence: 79, note: 'Verify printed payment terms' },
-        subtotal: { value: 64500, confidence: 91 },
-        tax: { value: 6450, confidence: 90 },
-        total: { value: 70950, confidence: 92 },
-        supplierAddress: 'No. 88, 4th Cross Street, Pettah, Colombo 11',
-        supplierNtn: 'TIN 128830914 · VAT 128830914-7000',
-        lineItems: [
-          {
-            id: 'new-li-1',
-            description: 'Ceylon Turmeric Powder 1kg x 20 Pack',
-            sku: 'SPC-TUR-1K',
-            qty: 5,
-            unit: 'Cartons',
-            rate: 12900,
-            amount: 64500,
-            confidence: 84,
-            note: 'Slightly tilted scan on rate column',
-          },
-        ],
-        threeWayMatch: {
-          status: 'matched',
-          poNumber: 'PO-2026-115',
-          grnNumber: 'GRN-883',
-          summary: 'Matched PO-2026-115 quantities and agreed unit rate. Ready for quick approval.',
-          poTotal: 70950,
-          grnQtyMatched: true,
-        },
-      };
-      setDocuments((prev) => [newDoc, ...prev]);
-      setUploading(false);
-      setSelectedDocId(newId);
-      addAiLog({
-        module: 'Documents',
-        action: `Extracted new ${channel} invoice ${newDoc.invoiceNumber.value} (Rs. 70,950)`,
-        reason: 'Parsed 1 line item & ran 3-way match against PO-2026-115. Due date confidence 79% flagged for quick review.',
-        confidence: 87,
-        approvedBy: 'Pending Review',
-        outcome: 'flagged',
-      });
-      addToast({
-        title: 'Document scanned & extracted',
-        description: `${newDoc.invoiceNumber.value} parsed with 87% confidence.`,
-        variant: 'success',
-      });
-    }, 1100);
+  // Adds the files the owner actually selected. Automatic extraction (OCR, line
+  // items, PO/GRN matching) is not connected, so each record starts with no
+  // extracted values and is flagged for manual entry. Nothing is invented.
+  const addUploadedFiles = (files: FileList | null, channel: DocChannel = 'upload') => {
+    if (!files || files.length === 0) return;
+    const receivedAt = new Date().toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const newDocs: InboxDocument[] = Array.from(files).map((file, i) => ({
+      id: `DOC-${Date.now()}-${i}`,
+      fileName: file.name,
+      docType: 'Supplier Invoice',
+      channel,
+      receivedAt,
+      sender: 'Uploaded manually',
+      status: 'needs-review',
+      overallConfidence: 0,
+      isPhoto: file.type.startsWith('image/'),
+      supplier: { value: '', confidence: 0 },
+      invoiceNumber: { value: '', confidence: 0 },
+      invoiceDate: { value: '', confidence: 0 },
+      dueDate: { value: '', confidence: 0 },
+      subtotal: { value: 0, confidence: 0 },
+      tax: { value: 0, confidence: 0 },
+      total: { value: 0, confidence: 0 },
+      supplierAddress: '',
+      supplierNtn: '',
+      lineItems: [],
+      threeWayMatch: {
+        status: 'missing-grn',
+        poNumber: '',
+        summary: 'Not matched yet. Enter the invoice details, then review the match.',
+        poTotal: 0,
+        grnQtyMatched: false,
+      },
+      failureReason: 'Automatic extraction is not connected. Enter the invoice fields manually.',
+    }));
+    setDocuments((prev) => [...newDocs, ...prev]);
+    if (newDocs.length === 1) setSelectedDocId(newDocs[0].id);
+    addAiLog({
+      module: 'Documents',
+      action: `Added ${newDocs.length} document(s) to review: ${newDocs.map((d) => d.fileName).join(', ')}`,
+      reason: 'Stored from manual upload. Fields not extracted yet.',
+      approvedBy: 'Owner',
+      outcome: 'flagged',
+    });
+    addToast({
+      title: 'Document added to review',
+      description: `${newDocs.length} file(s) waiting for manual entry.`,
+      variant: 'info',
+    });
   };
 
   const handleDocAction = (doc: InboxDocument, action: 'approved' | 'rejected') => {
@@ -164,7 +152,7 @@ export function DocumentsScreen() {
           ? 'Owner verified low-confidence fields and approved ledger posting.'
           : 'Rejected due to variance / unreadable scan.',
       confidence: doc.overallConfidence,
-      approvedBy: 'Rohan (Owner)',
+      approvedBy: 'Owner',
       outcome: action === 'approved' ? 'approved' : 'rejected',
     });
     addToast({
@@ -397,7 +385,7 @@ export function DocumentsScreen() {
               >
                 {/* Watermark stamp */}
                 <div className="absolute top-6 right-6 border-2 border-emerald-700/40 text-emerald-800/50 rounded px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest rotate-[-12deg]">
-                  RECEIVED · GATE 2
+                  RECEIVED
                 </div>
 
                 {/* Letterhead */}
@@ -413,8 +401,6 @@ export function DocumentsScreen() {
                 <div className="grid grid-cols-2 gap-3 mb-4 text-[10px]">
                   <div>
                     <div className="text-slate-500 uppercase">Bill To:</div>
-                    <div className="font-bold">LANKA CREST WHOLESALE (PVT) LTD.</div>
-                    <div className="text-slate-600">Main Street, Pettah, Colombo 11</div>
                   </div>
                   <div className="space-y-1 text-right">
                     <div
@@ -482,7 +468,7 @@ export function DocumentsScreen() {
                       <span className="tabular-nums">{formatRs(activeDoc.subtotal.value)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-600">VAT (18% / Exempt):</span>
+                      <span className="text-slate-600">Tax:</span>
                       <span className="tabular-nums">{formatRs(activeDoc.tax.value)}</span>
                     </div>
                     <div
@@ -664,7 +650,7 @@ export function DocumentsScreen() {
                 <span className="tabular-nums font-medium">{formatRs(activeDoc.subtotal.value)}</span>
               </div>
               <div className="flex justify-between text-xs text-slate-600 dark:text-slate-300">
-                <span>VAT / SSCL</span>
+                <span>Tax</span>
                 <span className="tabular-nums font-medium">{formatRs(activeDoc.tax.value)}</span>
               </div>
               <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
@@ -713,7 +699,7 @@ export function DocumentsScreen() {
             variant="gold"
             size="sm"
             icon={<Upload className="w-4 h-4" />}
-            onClick={() => simulateUpload('upload')}
+            onClick={() => fileInputRef.current?.click()}
           >
             Upload Invoice
           </Button>
@@ -731,9 +717,9 @@ export function DocumentsScreen() {
           onDrop={(e) => {
             e.preventDefault();
             setIsDragging(false);
-            simulateUpload('upload');
+            addUploadedFiles(e.dataTransfer.files, 'upload');
           }}
-          onClick={() => simulateUpload('upload')}
+          onClick={() => fileInputRef.current?.click()}
           className={cn(
             'lg:col-span-2 p-5 rounded-xl border-2 border-dashed transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-between gap-4',
             isDragging
@@ -750,7 +736,7 @@ export function DocumentsScreen() {
                 Drop supplier PDFs or bill photos here
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Transmute extracts supplier, VAT/TIN, line items & runs 3-way match in ~3 seconds. Click to simulate an upload.
+                Files are added to the review queue. Enter the invoice details, then review the PO/GRN match.
               </p>
             </div>
           </div>
@@ -767,41 +753,32 @@ export function DocumentsScreen() {
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                 <Mail className="w-3.5 h-3.5 text-sky-500" />
-                bills@lankacrest.lk
+                Email intake
               </span>
-              <StatusChip label="Live" tone="green" />
+              <StatusChip label="Not connected" tone="slate" />
             </div>
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                 <MessageSquare className="w-3.5 h-3.5 text-emerald-500" />
-                WhatsApp Photo Bot
+                WhatsApp photos
               </span>
-              <button
-                onClick={() => simulateUpload('whatsapp')}
-                className="text-[11px] font-medium text-[#EA581A] dark:text-[#FF9E66] hover:underline cursor-pointer"
-              >
-                Simulate Photo
-              </button>
+              <StatusChip label="Not connected" tone="slate" />
             </div>
           </div>
         </Card>
       </div>
 
-      {/* Loading Skeleton during simulated upload */}
-      {uploading && (
-        <Card className="p-5 border-[#FFD5BE] dark:border-[#EA581A]/40 space-y-3">
-          <div className="flex items-center gap-2.5 text-xs font-semibold text-[#C2410C] dark:text-[#FF9E66]">
-            <RefreshCw className="w-4 h-4 animate-spin" />
-            Transmute AI is reading document text, extracting line items & checking PO/GRN match...
-          </div>
-          <div className="grid grid-cols-4 gap-3">
-            <SkeletonBlock className="h-8" />
-            <SkeletonBlock className="h-8" />
-            <SkeletonBlock className="h-8" />
-            <SkeletonBlock className="h-8" />
-          </div>
-        </Card>
-      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="application/pdf,image/*"
+        className="hidden"
+        onChange={(e) => {
+          addUploadedFiles(e.target.files, 'upload');
+          e.target.value = '';
+        }}
+      />
 
       {/* Filter Bar + Document Queue Table */}
       <Card className="overflow-hidden">

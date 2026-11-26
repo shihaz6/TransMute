@@ -2,20 +2,24 @@ package com.transmute.erp.haiku;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
 
 /**
- * Picks the haiku for a day. The verses are fixed and rotate by day of the year, so every
- * day shows the same verse, and the set repeats after {@link #HAIKU} runs out.
+ * Supplies the haiku for a day. When an API key is configured, a Claude model writes it once
+ * per day and the result is kept in memory. Otherwise, or if the model call fails, the fixed
+ * verse for that day is used.
  */
 @Service
 public class HaikuService {
 
-    /** The haiku for one day. Each verse is a list of three lines. */
-    public record DailyHaiku(String date, List<String> lines) {
+    /** The haiku for one day. {@code source} is "claude" when a model wrote it, else "fixed". */
+    public record DailyHaiku(String date, List<String> lines, String source) {
     }
 
-    private static final List<List<String>> HAIKU = List.of(
+    private static final List<List<String>> FIXED = List.of(
             List.of("Quiet ledger hums", "each figure finds its own place", "the machine keeps count"),
             List.of("Morning invoice stack", "a supplier's bill waits its turn", "review, then approve"),
             List.of("Shelves counted at dawn", "numbers settle into rows", "the warehouse breathes"),
@@ -37,8 +41,25 @@ public class HaikuService {
             List.of("Harvest of the week", "sold, received, paid and filed", "the books breathe out"),
             List.of("Ask a simple thing", "the answer comes in plain words", "numbers, no fuss"));
 
+    private final AnthropicHaikuClient claude;
+
+    /** One haiku per date, kept for the life of the process so the model is called once a day. */
+    private final Map<LocalDate, DailyHaiku> today = new ConcurrentHashMap<>();
+
+    public HaikuService(AnthropicHaikuClient claude) {
+        this.claude = claude;
+    }
+
     public DailyHaiku forDate(LocalDate date) {
-        int index = date.getDayOfYear() % HAIKU.size();
-        return new DailyHaiku(date.toString(), HAIKU.get(index));
+        return today.computeIfAbsent(date, this::build);
+    }
+
+    private DailyHaiku build(LocalDate date) {
+        Optional<List<String>> written = claude.writeHaiku(date.toString());
+        if (written.isPresent()) {
+            return new DailyHaiku(date.toString(), written.get(), "claude");
+        }
+        int index = date.getDayOfYear() % FIXED.size();
+        return new DailyHaiku(date.toString(), FIXED.get(index), "fixed");
     }
 }

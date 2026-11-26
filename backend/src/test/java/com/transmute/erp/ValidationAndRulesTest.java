@@ -31,7 +31,7 @@ import org.springframework.test.web.servlet.MvcResult;
         "spring.datasource.url=jdbc:h2:mem:validation-test;DB_CLOSE_DELAY=-1",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "transmute.storage.dir=target/validation-uploads",
-        "transmute.haiku.anthropic-api-key="
+        "transmute.haiku.groq-api-key="
 })
 @AutoConfigureMockMvc
 class ValidationAndRulesTest {

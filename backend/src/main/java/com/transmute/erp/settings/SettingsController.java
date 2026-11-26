@@ -1,5 +1,6 @@
 package com.transmute.erp.settings;
 
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -29,7 +30,7 @@ public class SettingsController {
 
     @PostMapping("/approval-rules")
     @ResponseStatus(HttpStatus.CREATED)
-    public ApprovalRule addRule(@RequestBody ApprovalRule body) {
+    public ApprovalRule addRule(@Valid @RequestBody ApprovalRule body) {
         return service.addRule(body);
     }
 

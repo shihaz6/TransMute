@@ -29,16 +29,20 @@ import {
 } from '@/components/ui/Primitives';
 import { DocChannel, DocStatus, InboxDocument } from '@/types/erp';
 import { formatRs } from '@/utils/format';
+import { apiDateFromText } from '@/utils/dates';
+import type { DocumentFieldsInput } from '@/api/erp';
 
 export function DocumentsScreen() {
   const {
     documents,
-    setDocuments,
     selectedDocId,
     setSelectedDocId,
-    addAiLog,
     addToast,
     navigateToEntity,
+    uploadDocuments,
+    updateDocumentFields,
+    approveDocument,
+    rejectDocument,
   } = useErp();
 
   const [channelFilter, setChannelFilter] = useState<'all' | DocChannel>('all');
@@ -71,124 +75,59 @@ export function DocumentsScreen() {
     });
   }, [documents, channelFilter, statusFilter, search]);
 
-  // Adds the files the owner actually selected. Automatic extraction (OCR, line
-  // items, PO/GRN matching) is not connected, so each record starts with no
-  // extracted values and is flagged for manual entry. Nothing is invented.
-  const addUploadedFiles = (files: FileList | null, channel: DocChannel = 'upload') => {
+  // Uploaded files are stored by the backend. No values are extracted from them, so each
+  // document waits in review for its fields to be entered by hand.
+  const addUploadedFiles = async (files: FileList | null, channel: DocChannel = 'upload') => {
     if (!files || files.length === 0) return;
-    const receivedAt = new Date().toLocaleString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-    const newDocs: InboxDocument[] = Array.from(files).map((file, i) => ({
-      id: `DOC-${Date.now()}-${i}`,
-      fileName: file.name,
-      docType: 'Supplier Invoice',
-      channel,
-      receivedAt,
-      sender: 'Uploaded manually',
-      status: 'needs-review',
-      overallConfidence: 0,
-      isPhoto: file.type.startsWith('image/'),
-      supplier: { value: '', confidence: 0 },
-      invoiceNumber: { value: '', confidence: 0 },
-      invoiceDate: { value: '', confidence: 0 },
-      dueDate: { value: '', confidence: 0 },
-      subtotal: { value: 0, confidence: 0 },
-      tax: { value: 0, confidence: 0 },
-      total: { value: 0, confidence: 0 },
-      supplierAddress: '',
-      supplierNtn: '',
-      lineItems: [],
-      threeWayMatch: {
-        status: 'missing-grn',
-        poNumber: '',
-        summary: 'Not matched yet. Enter the invoice details, then review the match.',
-        poTotal: 0,
-        grnQtyMatched: false,
-      },
-      failureReason: 'Automatic extraction is not connected. Enter the invoice fields manually.',
-    }));
-    setDocuments((prev) => [...newDocs, ...prev]);
-    if (newDocs.length === 1) setSelectedDocId(newDocs[0].id);
-    addAiLog({
-      module: 'Documents',
-      action: `Added ${newDocs.length} document(s) to review: ${newDocs.map((d) => d.fileName).join(', ')}`,
-      reason: 'Stored from manual upload. Fields not extracted yet.',
-      approvedBy: 'Owner',
-      outcome: 'flagged',
-    });
-    addToast({
-      title: 'Document added to review',
-      description: `${newDocs.length} file(s) waiting for manual entry.`,
-      variant: 'info',
-    });
+    const newId = await uploadDocuments(Array.from(files), channel);
+    if (newId && files.length === 1) setSelectedDocId(newId);
   };
 
-  const handleDocAction = (doc: InboxDocument, action: 'approved' | 'rejected') => {
-    setDocuments((prev) =>
-      prev.map((d) =>
-        d.id === doc.id
-          ? {
-              ...d,
-              status: action === 'approved' ? 'approved' : 'rejected',
-              overallConfidence: action === 'approved' ? 100 : d.overallConfidence,
-            }
-          : d
-      )
-    );
+  const handleDocAction = async (doc: InboxDocument, action: 'approved' | 'rejected') => {
     setEditMode(false);
-    addAiLog({
-      module: 'Documents',
-      action:
-        action === 'approved'
-          ? `Approved & posted invoice ${doc.invoiceNumber.value} (${formatRs(doc.total.value)})`
-          : `Rejected invoice ${doc.invoiceNumber.value} from ${doc.supplier.value}`,
-      reason:
-        action === 'approved'
-          ? 'Owner verified low-confidence fields and approved ledger posting.'
-          : 'Rejected due to variance / unreadable scan.',
-      confidence: doc.overallConfidence,
-      approvedBy: 'Owner',
-      outcome: action === 'approved' ? 'approved' : 'rejected',
-    });
-    addToast({
-      title: action === 'approved' ? 'Invoice Approved & Posted' : 'Document Rejected',
-      description: `${doc.invoiceNumber.value} · ${doc.supplier.value}`,
-      variant: action === 'approved' ? 'success' : 'warning',
-    });
+    if (action === 'approved') {
+      await approveDocument(doc.id);
+    } else {
+      await rejectDocument(doc.id);
+    }
   };
+
+  // Field edits are held here while typing and saved to the backend when the field loses focus.
+  const [fieldDraft, setFieldDraft] = useState<{ docId: string; field: string; value: string } | null>(null);
+
+  const draftValue = (docId: string, field: string, saved: string) =>
+    fieldDraft && fieldDraft.docId === docId && fieldDraft.field === field ? fieldDraft.value : saved;
 
   const handleUpdateField = (
     docId: string,
     field: 'invoiceNumber' | 'invoiceDate' | 'dueDate' | 'total',
     newValue: string
   ) => {
-    setDocuments((prev) =>
-      prev.map((d) => {
-        if (d.id !== docId) return d;
-        if (field === 'total') {
-          const num = Number(newValue.replace(/[^0-9]/g, '')) || 0;
-          return {
-            ...d,
-            total: { ...d.total, value: num, confidence: 100, verifiedBy: 'Owner', note: undefined },
-          };
+    setFieldDraft({ docId, field, value: newValue });
+  };
+
+  const commitField = (
+    docId: string,
+    field: 'invoiceNumber' | 'invoiceDate' | 'dueDate' | 'total',
+    value: string
+  ) => {
+    setFieldDraft(null);
+    const payload: DocumentFieldsInput = {};
+    if (field === 'total') {
+      payload.total = Number(value.replace(/[^0-9.]/g, '')) || 0;
+    } else if (field === 'invoiceNumber') {
+      payload.invoiceNumber = value.trim();
+    } else {
+      const iso = apiDateFromText(value);
+      if (!iso) {
+        if (value.trim()) {
+          addToast({ title: 'Enter a valid date', description: 'Use a date such as 14 Apr 2026.', variant: 'warning' });
         }
-        return {
-          ...d,
-          [field]: {
-            ...d[field],
-            value: newValue,
-            confidence: 100,
-            verifiedBy: 'Owner',
-            note: undefined,
-          },
-        };
-      })
-    );
+        return;
+      }
+      payload[field] = iso;
+    }
+    void updateDocumentFields(docId, payload);
   };
 
   const statusChip = (status: DocStatus) => {
@@ -548,12 +487,19 @@ export function DocumentsScreen() {
                     </div>
                     {editMode && editable ? (
                       <input
-                        value={String(field.value)}
+                        value={draftValue(activeDoc.id, key, String(field.value))}
                         onChange={(e) =>
                           handleUpdateField(
                             activeDoc.id,
                             key as 'invoiceNumber' | 'invoiceDate' | 'dueDate',
                             e.target.value
+                          )
+                        }
+                        onBlur={() =>
+                          commitField(
+                            activeDoc.id,
+                            key as 'invoiceNumber' | 'invoiceDate' | 'dueDate',
+                            draftValue(activeDoc.id, key, String(field.value))
                           )
                         }
                         className="w-full px-2.5 py-1.5 text-sm font-semibold rounded-lg bg-white dark:bg-zinc-900 border border-[#EA581A] focus:outline-none"
@@ -665,8 +611,15 @@ export function DocumentsScreen() {
                 </div>
                 {editMode ? (
                   <input
-                    value={activeDoc.total.value}
+                    value={draftValue(activeDoc.id, 'total', String(activeDoc.total.value))}
                     onChange={(e) => handleUpdateField(activeDoc.id, 'total', e.target.value)}
+                    onBlur={() =>
+                      commitField(
+                        activeDoc.id,
+                        'total',
+                        draftValue(activeDoc.id, 'total', String(activeDoc.total.value))
+                      )
+                    }
                     className="w-36 text-right px-2.5 py-1 text-base font-bold rounded-lg bg-white dark:bg-zinc-900 border border-[#EA581A] tabular-nums"
                   />
                 ) : (

@@ -25,7 +25,7 @@ export function AccountingScreen() {
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'Cash' | 'Bank Transfer' | 'Cheque'>('all');
 
   const matchedCount = bankRecon.filter((b) => b.status === 'matched').length;
-  const reconPct = Math.round((matchedCount / bankRecon.length) * 100);
+  const reconPct = bankRecon.length > 0 ? Math.round((matchedCount / bankRecon.length) * 100) : 0;
 
   const chequeStatusChip = (status: ChequeStatus) => {
     switch (status) {
@@ -48,7 +48,7 @@ export function AccountingScreen() {
     <div className="space-y-6">
       <PageHeader
         title="Accounting & Banking"
-        subtitle="Plain-English money in & out, post-dated cheque clearance tracking, and AI-assisted Commercial Bank statement reconciliation."
+        subtitle="Plain-English money in & out, post-dated cheque clearance tracking, and AI-assisted bank statement reconciliation."
       />
 
       {/* Tabs */}
@@ -93,7 +93,7 @@ export function AccountingScreen() {
             <div className="text-right">
               <div className="text-[11px] text-slate-500">Current Balance</div>
               <div className="text-base font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
-                {formatRs(ledger[0]?.runningBalance ?? 4860000)}
+                {formatRs(ledger[0]?.runningBalance ?? 0)}
               </div>
             </div>
           </div>
@@ -281,7 +281,7 @@ export function AccountingScreen() {
               </div>
               <div>
                 <div className="text-sm font-semibold text-slate-900 dark:text-white">
-                  Commercial Bank Current A/C (····8821-01) — Live Statement Sync
+                  Bank Statement Reconciliation
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {matchedCount} of {bankRecon.length} statement lines reconciled ({reconPct}%)
@@ -299,6 +299,11 @@ export function AccountingScreen() {
           </Card>
 
           <div className="space-y-3">
+            {bankRecon.length === 0 && (
+              <Card className="p-8 text-center text-xs text-slate-500">
+                No bank statement lines yet. Import a statement to start reconciling.
+              </Card>
+            )}
             {bankRecon.map((row) => (
               <Card key={row.id} className="p-4">
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">

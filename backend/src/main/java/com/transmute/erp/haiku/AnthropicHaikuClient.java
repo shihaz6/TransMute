@@ -39,8 +39,10 @@ class AnthropicHaikuClient {
         if (!configured()) {
             return Optional.empty();
         }
-        String prompt = "Today is " + date + ". Write one haiku (three lines, roughly 5-7-5 syllables) "
-                + "about the day's work at a wholesale business: stock, orders, receipts and payments. "
+        String prompt = "Today is " + date + ". You write haiku for a grocery and food distribution business: "
+                + "wholesale warehouses, delivery vans, shop shelves, cold rooms, supplier deliveries, reorders, "
+                + "credit customers and cash at the till. Write one haiku (three lines, roughly 5-7-5 syllables) "
+                + "about the day's work in that business, using concrete everyday detail. "
                 + "Reply with only the three lines.";
         Map<String, Object> body = Map.of(
                 "model", model,

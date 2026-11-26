@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { erpApi } from '@/api/erp';
+import type { DailyHaikuDto } from '@/api/dto';
 import {
   AlertTriangle,
   ArrowRight,
@@ -36,6 +38,14 @@ export function DashboardScreen() {
     aiLogs,
     createDraftPoFromInventory,
   } = useErp();
+
+  const [haiku, setHaiku] = useState<DailyHaikuDto | null>(null);
+  useEffect(() => {
+    erpApi
+      .dailyHaiku()
+      .then(setHaiku)
+      .catch(() => setHaiku(null));
+  }, []);
 
   const now = new Date();
   const dateLabel = now.toLocaleDateString('en-GB', {
@@ -137,6 +147,22 @@ export function DashboardScreen() {
           </>
         }
       />
+
+      {/* Daily haiku from the backend. Hidden when the backend cannot be reached. */}
+      {haiku && (
+        <Card className="p-5">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#C2410C] dark:text-[#FF9E66]">
+            Haiku of the day
+          </p>
+          <blockquote className="mt-2 text-sm italic text-zinc-700 dark:text-zinc-300 leading-relaxed">
+            {haiku.lines.map((line) => (
+              <span key={line} className="block">
+                {line}
+              </span>
+            ))}
+          </blockquote>
+        </Card>
+      )}
 
       {/* KPI Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">

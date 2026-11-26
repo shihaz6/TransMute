@@ -1,7 +1,7 @@
 // Thin HTTP client for the TransMute backend. All requests go to API_BASE_URL.
 
 export const API_BASE_URL: string =
-  (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8080';
+  (import.meta.env?.VITE_API_URL as string | undefined) ?? 'http://localhost:8080';
 
 /** An error returned by the backend, or a network failure (status 0). */
 export class ApiError extends Error {

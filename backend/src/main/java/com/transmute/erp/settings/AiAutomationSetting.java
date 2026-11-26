@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.validation.constraints.NotBlank;
 
 /** How much the AI may do on its own for one task. */
 @Entity
@@ -13,6 +14,7 @@ public class AiAutomationSetting {
     @Id
     private String id;
 
+    @NotBlank
     @Column(nullable = false)
     private String task;
 

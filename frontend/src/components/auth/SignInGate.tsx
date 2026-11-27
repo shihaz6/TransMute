@@ -54,6 +54,8 @@ export function SignInGate({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     try {
       await erpApi.logout();
+    } catch {
+      // The local session is cleared below even when the server call fails, so the error is not rethrown.
     } finally {
       setSession({ status: 'signed-out' });
     }

@@ -39,12 +39,11 @@ public class SupplierService {
         existing.setContactPerson(input.getContactPerson());
         existing.setPhone(input.getPhone());
         existing.setPaymentTerms(input.getPaymentTerms());
-        existing.setYtdSpend(input.getYtdSpend());
+        // ytdSpend and priceHistory are server-owned and are not taken from the request.
         existing.setOnTimeRate(input.getOnTimeRate());
         existing.setBankAccountLast4(input.getBankAccountLast4());
         existing.setTrackedProduct(input.getTrackedProduct());
         existing.setPriceAlert(input.getPriceAlert());
-        existing.setPriceHistory(input.getPriceHistory());
         return existing;
     }
 }

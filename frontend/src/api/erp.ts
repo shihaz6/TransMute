@@ -139,7 +139,9 @@ export const erpApi = {
   uploadDocument: (file: File, channel: string) => apiUpload<InboxDocumentDto>('/api/documents', file, channel),
   updateDocumentFields: (id: string, body: DocumentFieldsInput) =>
     apiSend<InboxDocumentDto>('PATCH', `/api/documents/${id}`, body),
-  approveDocument: (id: string) => apiSend<InboxDocumentDto>('POST', `/api/documents/${id}/approve`),
+  /** The server refuses a document whose three-way match is not "matched" unless overrideMatch=true (the owner override). */
+  approveDocument: (id: string, overrideMatch = false) =>
+    apiSend<InboxDocumentDto>('POST', `/api/documents/${id}/approve${overrideMatch ? '?overrideMatch=true' : ''}`),
   rejectDocument: (id: string) => apiSend<InboxDocumentDto>('POST', `/api/documents/${id}/reject`),
   documentFileUrl: (id: string) => apiFileUrl(`/api/documents/${id}/file`),
 

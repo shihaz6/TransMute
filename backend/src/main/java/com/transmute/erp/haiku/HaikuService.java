@@ -1,16 +1,21 @@
 package com.transmute.erp.haiku;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
  * Supplies the haiku for a day. When an API key is configured, an AI model writes it once
  * per day and the result is kept in memory. Otherwise, or if the model call fails, the fixed
- * verse for that day is used. Both are written for a grocery and food distribution business.
+ * verse for that day is used. A failed model call is retried after a short cooldown. Both are
+ * written for a grocery and food distribution business.
  */
 @Service
 public class HaikuService {
@@ -18,6 +23,8 @@ public class HaikuService {
     /** The haiku for one day. {@code source} is "ai" when a model wrote it, else "fixed". */
     public record DailyHaiku(String date, List<String> lines, String source) {
     }
+
+    private static final Duration RETRY_AFTER = Duration.ofMinutes(10);
 
     private static final List<List<String>> FIXED = List.of(
             List.of("Pallets at the dock", "manifests checked against the truck", "the route starts at dawn"),
@@ -42,23 +49,45 @@ public class HaikuService {
             List.of("Quiet stock room", "sacks counted by the window", "the week is balanced"));
 
     private final GroqHaikuClient ai;
+    private final Clock clock;
 
-    /** One haiku per date, kept for the life of the process so the model is called once a day. */
+    /** One AI haiku per date, kept for the life of the process so the model is called once a day. */
     private final Map<LocalDate, DailyHaiku> today = new ConcurrentHashMap<>();
 
+    /** When the model last failed for a date. Until the cooldown passes, the fixed verse is used. */
+    private final Map<LocalDate, Instant> lastFailure = new ConcurrentHashMap<>();
+
+    @Autowired
     public HaikuService(GroqHaikuClient ai) {
+        this(ai, Clock.systemUTC());
+    }
+
+    public HaikuService(GroqHaikuClient ai, Clock clock) {
         this.ai = ai;
+        this.clock = clock;
     }
 
-    public DailyHaiku forDate(LocalDate date) {
-        return today.computeIfAbsent(date, this::build);
-    }
-
-    private DailyHaiku build(LocalDate date) {
+    public synchronized DailyHaiku forDate(LocalDate date) {
+        DailyHaiku cached = today.get(date);
+        if (cached != null) {
+            return cached;
+        }
+        Instant failed = lastFailure.get(date);
+        if (failed != null && clock.instant().isBefore(failed.plus(RETRY_AFTER))) {
+            return fixed(date);
+        }
         Optional<List<String>> written = ai.writeHaiku(date.toString());
         if (written.isPresent()) {
-            return new DailyHaiku(date.toString(), written.get(), "ai");
+            DailyHaiku haiku = new DailyHaiku(date.toString(), written.get(), "ai");
+            today.put(date, haiku);
+            lastFailure.remove(date);
+            return haiku;
         }
+        lastFailure.put(date, clock.instant());
+        return fixed(date);
+    }
+
+    private DailyHaiku fixed(LocalDate date) {
         int index = date.getDayOfYear() % FIXED.size();
         return new DailyHaiku(date.toString(), FIXED.get(index), "fixed");
     }

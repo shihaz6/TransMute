@@ -29,6 +29,18 @@ function csrfToken(): string | undefined {
   }
 }
 
+let warnedMissingCsrf = false;
+
+/** The CSRF token for a write. Warns once when it is missing, but the request is still sent. */
+function writeCsrfToken(): string | undefined {
+  const token = csrfToken();
+  if (!token && !warnedMissingCsrf) {
+    warnedMissingCsrf = true;
+    console.warn('XSRF-TOKEN cookie not found. Write requests are sent without the X-XSRF-TOKEN header.');
+  }
+  return token;
+}
+
 async function send(url: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(url, { ...init, credentials: 'include' });
@@ -40,8 +52,12 @@ async function send(url: string, init: RequestInit): Promise<Response> {
 async function parse<T>(res: Response): Promise<T> {
   if (res.ok) {
     if (res.status === 204) return undefined as T;
-    const text = await res.text();
-    return (text ? JSON.parse(text) : undefined) as T;
+    try {
+      const text = await res.text();
+      return (text ? JSON.parse(text) : undefined) as T;
+    } catch {
+      throw new ApiError('The server sent an unexpected response. Try again.', res.status);
+    }
   }
   let message = `Request failed (${res.status})`;
   let fields: Record<string, string> | undefined;
@@ -51,6 +67,9 @@ async function parse<T>(res: Response): Promise<T> {
     if (body && body.fields) fields = body.fields;
   } catch {
     // Keep the generic message when the body is not JSON.
+  }
+  if (res.status === 403) {
+    message = 'Your session may have expired. Refresh the page and sign in again.';
   }
   if (res.status === 401) {
     window.dispatchEvent(new Event(SESSION_ENDED_EVENT));
@@ -63,7 +82,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiSend<T>(method: 'POST' | 'PUT' | 'PATCH', path: string, body?: unknown): Promise<T> {
-  const token = csrfToken();
+  const token = writeCsrfToken();
   return parse<T>(
     await send(API_BASE_URL + path, {
       method,
@@ -81,7 +100,7 @@ export async function apiUpload<T>(path: string, file: File, channel: string): P
   const form = new FormData();
   form.append('file', file);
   form.append('channel', channel);
-  const token = csrfToken();
+  const token = writeCsrfToken();
   return parse<T>(
     await send(API_BASE_URL + path, {
       method: 'POST',

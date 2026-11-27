@@ -36,6 +36,8 @@ public class DocumentService {
             String supplierNtn) {
     }
 
+    private static final String NEEDS_REVIEW = "needs-review";
+
     private final InboxDocumentRepository documents;
     private final AuditService audit;
     private final Path storageDir;
@@ -61,8 +63,9 @@ public class DocumentService {
     }
 
     /**
-     * Stores an uploaded file and creates an inbox record for it. If a vision model is configured,
-     * blank invoice fields are filled from the image. The record always stays in needs-review.
+     * Stores an uploaded file and creates an inbox record for it. The file type is taken from the
+     * file's content, not from the client. If a vision model is configured, blank invoice fields are
+     * filled from the image. The record always stays in needs-review.
      */
     public InboxDocument store(MultipartFile file, String channel) {
         if (file == null || file.isEmpty()) {
@@ -71,6 +74,10 @@ public class DocumentService {
         String safeChannel = channel == null || channel.isBlank() ? "upload" : channel;
         if (!List.of("upload", "email", "whatsapp").contains(safeChannel)) {
             throw new BadRequestException("channel must be upload, email or whatsapp");
+        }
+        String contentType = detectContentType(file);
+        if (contentType == null) {
+            throw new BadRequestException("Upload a PDF or an image (PNG, JPEG, WEBP or GIF)");
         }
         String original = file.getOriginalFilename() == null ? "document" : file.getOriginalFilename();
         String id = Ids.next("DOC");
@@ -88,17 +95,17 @@ public class DocumentService {
         doc.setId(id);
         doc.setFileName(original);
         doc.setStoredPath(target.toString());
-        doc.setContentType(file.getContentType());
+        doc.setContentType(contentType);
         doc.setSizeBytes(file.getSize());
         doc.setChannel(safeChannel);
         doc.setReceivedAt(Instant.now());
         doc.setSender("Uploaded manually");
-        doc.setStatus("needs-review");
-        doc.setPhoto(file.getContentType() != null && file.getContentType().startsWith("image/"));
+        doc.setStatus(NEEDS_REVIEW);
+        doc.setPhoto(contentType.startsWith("image/"));
         doc.setFailureReason("Fields not read from the file. Enter the invoice fields manually.");
         InboxDocument saved = documents.save(doc);
 
-        boolean read = extractor.extract(target, doc.getContentType())
+        boolean read = extractor.extract(target, contentType)
                 .map(fields -> applyExtracted(saved, fields))
                 .orElse(false);
         audit.record("Documents", "Added document " + original + " to review",
@@ -106,6 +113,14 @@ public class DocumentService {
                         : "Stored from upload. Fields not read from the file.",
                 null, "Owner", "flagged");
         return saved;
+    }
+
+    private static String detectContentType(MultipartFile file) {
+        try (InputStream in = file.getInputStream()) {
+            return UploadTypes.detect(in.readNBytes(UploadTypes.HEADER_BYTES));
+        } catch (IOException e) {
+            throw new IllegalStateException("Could not read the uploaded file", e);
+        }
     }
 
     /**
@@ -152,9 +167,14 @@ public class DocumentService {
         }
     }
 
+    /** Parses an amount read from the file. Negative amounts are ignored, not stored. */
     private static BigDecimal parseAmount(String s) {
         try {
-            return notBlank(s) ? new BigDecimal(s.replace(",", "").trim()) : null;
+            if (!notBlank(s)) {
+                return null;
+            }
+            BigDecimal v = new BigDecimal(s.replace(",", "").trim());
+            return v.signum() < 0 ? null : v;
         } catch (NumberFormatException e) {
             return null;
         }
@@ -166,6 +186,8 @@ public class DocumentService {
 
     public InboxDocument updateFields(String id, FieldUpdate update) {
         InboxDocument doc = get(id);
+        requireNeedsReview(doc, "Approved or rejected documents cannot be edited");
+        requireNotNegative(update.subtotal(), update.tax(), update.total());
         if (update.supplier() != null) doc.setSupplier(update.supplier());
         if (update.invoiceNumber() != null) doc.setInvoiceNumber(update.invoiceNumber());
         if (update.invoiceDate() != null) doc.setInvoiceDate(update.invoiceDate());
@@ -181,6 +203,7 @@ public class DocumentService {
     /** Approves a document once the supplier, invoice number and total are filled in. */
     public InboxDocument approve(String id) {
         InboxDocument doc = get(id);
+        requireNeedsReview(doc, "Only documents waiting for review can be approved");
         boolean complete = notBlank(doc.getSupplier()) && notBlank(doc.getInvoiceNumber())
                 && doc.getTotal() != null && doc.getTotal().signum() > 0;
         if (!complete) {
@@ -196,6 +219,7 @@ public class DocumentService {
 
     public InboxDocument reject(String id) {
         InboxDocument doc = get(id);
+        requireNeedsReview(doc, "Only documents waiting for review can be rejected");
         doc.setStatus("rejected");
         audit.record("Documents", "Rejected document " + doc.getFileName(),
                 "Owner rejected the document.", null, "Owner", "rejected");
@@ -216,6 +240,20 @@ public class DocumentService {
     @Transactional(readOnly = true)
     public InboxDocument metadata(String id) {
         return get(id);
+    }
+
+    private static void requireNeedsReview(InboxDocument doc, String message) {
+        if (!NEEDS_REVIEW.equals(doc.getStatus())) {
+            throw new BadRequestException(message);
+        }
+    }
+
+    private static void requireNotNegative(BigDecimal... amounts) {
+        for (BigDecimal amount : amounts) {
+            if (amount != null && amount.signum() < 0) {
+                throw new BadRequestException("Subtotal, tax and total cannot be negative");
+            }
+        }
     }
 
     private static boolean notBlank(String s) {

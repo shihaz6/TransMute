@@ -11,7 +11,9 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -59,6 +61,10 @@ public class PurchaseOrderService {
             throw new BadRequestException("A purchase order needs at least one line");
         }
         Supplier supplier = suppliers.get(input.supplierId());
+        List<PoLine> lines = new ArrayList<>();
+        for (PoLine line : input.lines()) {
+            lines.add(validatedNewLine(line));
+        }
         PurchaseOrder po = new PurchaseOrder();
         po.setId(Ids.next("PO"));
         po.setSupplierId(supplier.getId());
@@ -66,8 +72,8 @@ public class PurchaseOrderService {
         po.setCreatedAt(Instant.now());
         po.setExpectedDate(input.expectedDate());
         po.setStatus("draft");
-        po.setLines(new ArrayList<>(input.lines()));
-        po.setTotal(totalOf(input.lines()));
+        po.setLines(lines);
+        po.setTotal(totalOf(lines));
         PurchaseOrder saved = orders.save(po);
         audit.record("Purchasing", "Created purchase order " + saved.getId() + " for " + supplier.getName(),
                 "Created manually.", null, "Owner", "approved");
@@ -116,12 +122,14 @@ public class PurchaseOrderService {
     }
 
     /**
-     * Records goods received against a purchase order. Every line is validated before any
-     * stock moves, so a rejected receipt changes nothing. Received quantity is added to the
-     * warehouse stock of the matching SKU.
+     * Records goods received against a purchase order. The order row is locked for the
+     * whole call, so two receipts against the same order run one after the other and the
+     * outstanding quantity is checked against the latest received total. Every line is
+     * validated before any stock moves, so a rejected receipt changes nothing.
      */
     public PurchaseOrder receive(String id, Receipt receipt) {
-        PurchaseOrder po = get(id);
+        PurchaseOrder po = orders.findByIdForUpdate(id)
+                .orElseThrow(() -> new NotFoundException("Purchase order", id));
         if (!"sent".equals(po.getStatus()) && !"partial-received".equals(po.getStatus())) {
             throw new BadRequestException("Purchase order " + id + " is not open for receiving");
         }
@@ -140,15 +148,20 @@ public class PurchaseOrderService {
             if (r.qty() <= 0 || r.qty() > outstanding) {
                 throw new BadRequestException("Received quantity for " + r.sku() + " must be between 1 and " + outstanding);
             }
-            if (inventory.findBySku(r.sku()).isEmpty()) {
-                throw new BadRequestException("No inventory item exists for SKU " + r.sku());
-            }
             updated.set(index, new PoLine(line.sku(), line.productName(), line.unit(), line.orderedQty(),
                     line.receivedQty() + r.qty(), line.invoicedQty(), line.unitCost()));
         }
 
+        // Lock the stock rows in SKU order so concurrent receipts cannot deadlock on each other.
+        Map<String, InventoryItem> locked = new HashMap<>();
+        List<String> skus = receipt.lines().stream().map(ReceivedLine::sku).distinct().sorted().toList();
+        for (String sku : skus) {
+            InventoryItem item = inventory.findBySkuForUpdate(sku)
+                    .orElseThrow(() -> new BadRequestException("No inventory item exists for SKU " + sku));
+            locked.put(sku, item);
+        }
         for (ReceivedLine r : receipt.lines()) {
-            InventoryItem item = inventory.findBySku(r.sku()).orElseThrow();
+            InventoryItem item = locked.get(r.sku());
             item.setWarehouseStock(item.getWarehouseStock() + r.qty());
         }
 
@@ -173,6 +186,26 @@ public class PurchaseOrderService {
                 complete ? "All lines received." : "Partial delivery; the rest is still outstanding.",
                 null, receipt.receivedBy() == null ? "Owner" : receipt.receivedBy(), "approved");
         return po;
+    }
+
+    /**
+     * Checks a line sent when creating an order and returns the stored form. Received and
+     * invoiced quantities always start at zero, whatever the client sent.
+     */
+    private PoLine validatedNewLine(PoLine line) {
+        if (line == null || line.sku() == null || line.sku().isBlank()) {
+            throw new BadRequestException("Every purchase order line needs a SKU");
+        }
+        if (line.orderedQty() <= 0) {
+            throw new BadRequestException("Ordered quantity for " + line.sku() + " must be greater than zero");
+        }
+        if (line.unitCost() == null || line.unitCost().signum() < 0) {
+            throw new BadRequestException("Unit cost for " + line.sku() + " cannot be negative");
+        }
+        if (inventory.findBySku(line.sku()).isEmpty()) {
+            throw new BadRequestException("Unknown SKU: " + line.sku());
+        }
+        return new PoLine(line.sku(), line.productName(), line.unit(), line.orderedQty(), 0, 0, line.unitCost());
     }
 
     private static int indexOfSku(List<PoLine> lines, String sku) {

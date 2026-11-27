@@ -23,7 +23,20 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class InvoiceExtractor {
 
-    /** Values read from the invoice. Blank or null means the model did not find it. */
+    /** One invoice line as read from the file. Blank or null means the model did not find it. */
+    public record Line(
+            String description,
+            String sku,
+            String qty,
+            String unit,
+            String rate,
+            String amount) {
+    }
+
+    /**
+     * Values read from the invoice. Blank or null means the model did not find it.
+     * lineItems may be null when the model omits the key; treat null as an empty list.
+     */
     public record Extracted(
             String supplier,
             String invoiceNumber,
@@ -33,7 +46,8 @@ public class InvoiceExtractor {
             String tax,
             String total,
             String supplierAddress,
-            String supplierNtn) {
+            String supplierNtn,
+            List<Line> lineItems) {
     }
 
     static final Set<String> IMAGE_TYPES = Set.of("image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif");
@@ -48,7 +62,10 @@ public class InvoiceExtractor {
             "This is a supplier invoice from a food distribution business. Read the header fields and reply with "
             + "only a JSON object with these keys: supplier, invoiceNumber, invoiceDate (YYYY-MM-DD), dueDate "
             + "(YYYY-MM-DD), subtotal, tax, total (plain numbers, no currency symbols), supplierAddress, "
-            + "supplierNtn. Use null for any field you cannot read clearly. Do not guess.";
+            + "supplierNtn, lineItems. lineItems is an array with one object per invoice line, each with keys "
+            + "description, sku, qty, unit, rate (unit price) and amount (line total), using plain numbers with no "
+            + "currency symbols. Use an empty array if no lines can be read. Use null for any field you cannot read "
+            + "clearly. Do not guess.";
 
     private final GroqClient groq;
     private final ObjectMapper json;
@@ -83,7 +100,7 @@ public class InvoiceExtractor {
                     "content", List.of(
                             Map.of("type", "text", "text", PROMPT),
                             Map.of("type", "image_url", "image_url", Map.of("url", dataUrl)))));
-            return groq.complete(model, messages, 800, null)
+            return groq.complete(model, messages, 1600, null)
                     .map(InvoiceExtractor::jsonPart)
                     .flatMap(this::parse);
         } catch (IOException | RuntimeException e) {
@@ -100,7 +117,7 @@ public class InvoiceExtractor {
                 List<Map<String, Object>> messages = List.of(Map.of(
                         "role", "user",
                         "content", PROMPT + "\n\nInvoice text:\n" + text));
-                return groq.complete(textModel, messages, 800, null)
+                return groq.complete(textModel, messages, 1600, null)
                         .map(InvoiceExtractor::jsonPart)
                         .flatMap(this::parse);
             }
@@ -115,7 +132,7 @@ public class InvoiceExtractor {
                 content.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl)));
             }
             List<Map<String, Object>> messages = List.of(Map.of("role", "user", "content", content));
-            return groq.complete(model, messages, 800, null)
+            return groq.complete(model, messages, 1600, null)
                     .map(InvoiceExtractor::jsonPart)
                     .flatMap(this::parse);
         } catch (IOException | RuntimeException e) {

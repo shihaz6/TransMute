@@ -18,9 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class CatalystController {
 
     private final CatalystMessageRepository messages;
+    private final CatalystService catalyst;
 
-    public CatalystController(CatalystMessageRepository messages) {
+    public CatalystController(CatalystMessageRepository messages, CatalystService catalyst) {
         this.messages = messages;
+        this.catalyst = catalyst;
     }
 
     @GetMapping
@@ -41,6 +43,8 @@ public class CatalystController {
         message.setSenderLabel("Owner");
         message.setCreatedAt(Instant.now());
         message.setText(text.trim());
-        return messages.save(message);
+        CatalystMessage saved = messages.save(message);
+        catalyst.replyTo(saved);
+        return saved;
     }
 }

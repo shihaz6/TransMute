@@ -9,8 +9,15 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class HaikuServiceTest {
@@ -20,7 +27,7 @@ class HaikuServiceTest {
     @Test
     void usesFixedVerseWhenAiIsNotConfigured() {
         GroqHaikuClient unconfigured = new GroqHaikuClient(new GroqClient("", "m", "http://localhost:1"));
-        HaikuService service = new HaikuService(unconfigured);
+        HaikuService service = new HaikuService(unconfigured, new MutableClock(Instant.parse("2026-03-10T08:00:00Z")));
 
         HaikuService.DailyHaiku haiku = service.forDate(DAY);
 
@@ -62,6 +69,78 @@ class HaikuServiceTest {
         assertThat(client.calls).isEqualTo(2);
     }
 
+    @Test
+    void keepsCachedHaikuWithinWindowAndAsksAgainForANewDay() {
+        CountingClient client = new CountingClient(List.of(
+                Optional.of(List.of("one", "two", "three")),
+                Optional.of(List.of("four", "five", "six"))));
+        MutableClock clock = new MutableClock(Instant.parse("2026-03-10T08:00:00Z"));
+        HaikuService service = new HaikuService(client, clock);
+
+        assertThat(service.forDate(DAY).source()).isEqualTo("ai");
+        assertThat(client.calls).isEqualTo(1);
+
+        clock.now = Instant.parse("2026-03-11T08:00:00Z");
+        assertThat(service.forDate(DAY).source()).isEqualTo("ai");
+        assertThat(client.calls).isEqualTo(1);
+
+        clock.now = Instant.parse("2026-03-13T08:00:00Z");
+        assertThat(service.forDate(LocalDate.of(2026, 3, 13)).lines()).containsExactly("four", "five", "six");
+        assertThat(client.calls).isEqualTo(2);
+    }
+
+    @Test
+    void dateOutsideTheWindowGetsFixedVerseWithoutCallingModel() {
+        CountingClient client = new CountingClient(List.of(Optional.of(List.of("one", "two", "three"))));
+        HaikuService service = new HaikuService(client, new MutableClock(Instant.parse("2026-03-10T08:00:00Z")));
+
+        HaikuService.DailyHaiku haiku = service.forDate(DAY.plusDays(10));
+
+        assertThat(haiku.source()).isEqualTo("fixed");
+        assertThat(haiku.date()).isEqualTo("2026-03-20");
+        assertThat(client.calls).isEqualTo(0);
+    }
+
+    @Test
+    void modelExceptionUsesFixedVerseAndWaitsForCooldown() {
+        Instant start = Instant.parse("2026-03-10T08:00:00Z");
+        MutableClock clock = new MutableClock(start);
+        ThrowingClient client = new ThrowingClient();
+        HaikuService service = new HaikuService(client, clock);
+
+        assertThat(service.forDate(DAY).source()).isEqualTo("fixed");
+        assertThat(client.calls).isEqualTo(1);
+
+        clock.now = start.plus(Duration.ofMinutes(5));
+        assertThat(service.forDate(DAY).source()).isEqualTo("fixed");
+        assertThat(client.calls).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentRequestsForSameDateCallModelOnce() throws Exception {
+        SlowClient client = new SlowClient();
+        HaikuService service = new HaikuService(client, new MutableClock(Instant.parse("2026-03-10T08:00:00Z")));
+        int threads = 4;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<HaikuService.DailyHaiku>> results = new ArrayList<>();
+            for (int i = 0; i < threads; i++) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return service.forDate(DAY);
+                }));
+            }
+            start.countDown();
+            for (Future<HaikuService.DailyHaiku> result : results) {
+                assertThat(result.get(10, TimeUnit.SECONDS).source()).isEqualTo("ai");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(client.calls.get()).isEqualTo(1);
+    }
+
     /** Returns the scripted replies in order and counts how many times the model was asked. */
     private static final class CountingClient extends GroqHaikuClient {
 
@@ -77,6 +156,43 @@ class HaikuServiceTest {
         Optional<List<String>> writeHaiku(String date) {
             calls++;
             return replies.get(Math.min(calls - 1, replies.size() - 1));
+        }
+    }
+
+    /** Always throws, as an SDK failure outside the HTTP path would. */
+    private static final class ThrowingClient extends GroqHaikuClient {
+
+        int calls;
+
+        ThrowingClient() {
+            super(new GroqClient("", "m", "http://localhost:1"));
+        }
+
+        @Override
+        Optional<List<String>> writeHaiku(String date) {
+            calls++;
+            throw new IllegalStateException("model SDK failed");
+        }
+    }
+
+    /** Sleeps before answering and counts calls across threads. */
+    private static final class SlowClient extends GroqHaikuClient {
+
+        final AtomicInteger calls = new AtomicInteger();
+
+        SlowClient() {
+            super(new GroqClient("", "m", "http://localhost:1"));
+        }
+
+        @Override
+        Optional<List<String>> writeHaiku(String date) {
+            calls.incrementAndGet();
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return Optional.of(List.of("one", "two", "three"));
         }
     }
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { ErpProvider, useErp } from '@/context/ErpContext';
+import { SignInGate } from '@/components/auth/SignInGate';
 import { AppShell } from '@/components/layout/AppShell';
 import { AIActionLogDrawer } from '@/components/overlays/AIActionLogDrawer';
 import { CatalystPanel } from '@/components/overlays/CatalystPanel';
@@ -81,9 +82,12 @@ function TransmuteRouter() {
 }
 
 export default function App() {
+  // The data provider mounts only after sign-in, so no screen requests data before then.
   return (
-    <ErpProvider>
-      <TransmuteRouter />
-    </ErpProvider>
+    <SignInGate>
+      <ErpProvider>
+        <TransmuteRouter />
+      </ErpProvider>
+    </SignInGate>
   );
 }

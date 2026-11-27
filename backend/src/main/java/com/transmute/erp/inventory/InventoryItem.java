@@ -3,6 +3,7 @@ package com.transmute.erp.inventory;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.Version;
 import jakarta.persistence.Table;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -14,6 +15,9 @@ public class InventoryItem {
 
     @Id
     private String id;
+
+    @Version
+    private Long version;
 
     @NotBlank
     @Column(nullable = false, unique = true)
@@ -46,6 +50,9 @@ public class InventoryItem {
     public int totalStock() {
         return warehouseStock + shopStock + vanStock;
     }
+
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }

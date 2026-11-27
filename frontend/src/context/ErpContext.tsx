@@ -26,6 +26,7 @@ import { ApiError } from '@/api/client';
 import {
   erpApi,
   type BankLineInput,
+  type CustomerPatch,
   type DocumentFieldsInput,
   type OrderCreateInput,
   type OrderLineInput,
@@ -108,6 +109,22 @@ function errorMessage(error: unknown): string {
   return 'An unexpected error occurred.';
 }
 
+/** The customer fields the PATCH endpoint accepts. Balance fields are never sent. */
+const CUSTOMER_PATCH_KEYS: (keyof CustomerPatch)[] = ['name', 'contactPerson', 'phone', 'email', 'city', 'category'];
+
+function setPatchKey<K extends keyof CustomerPatch>(target: CustomerPatch, key: K, value: CustomerPatch[K]) {
+  target[key] = value;
+}
+
+/** Copies only the allowed keys whose value is not undefined. Nulls are kept so they clear a field. */
+function pickCustomerPatch(input: CustomerPatch): CustomerPatch {
+  const changes: CustomerPatch = {};
+  for (const key of CUSTOMER_PATCH_KEYS) {
+    if (input[key] !== undefined) setPatchKey(changes, key, input[key]);
+  }
+  return changes;
+}
+
 interface ErpContextValue {
   route: NavRoute;
   setRoute: (r: NavRoute) => void;
@@ -161,7 +178,8 @@ interface ErpContextValue {
 
   // Actions. Each one calls the backend, reloads the lists it changed, and reports the outcome.
   createCustomer: (input: Partial<CustomerDto>) => Promise<void>;
-  updateCustomer: (id: string, input: Partial<CustomerDto>) => Promise<void>;
+  /** Resolves true when the change was saved. Errors are reported by toast. */
+  updateCustomer: (id: string, input: CustomerPatch) => Promise<boolean>;
   createInventoryItem: (input: Partial<InventoryItemDto>) => Promise<void>;
   updateInventoryItem: (id: string, input: Partial<InventoryItemDto>) => Promise<void>;
   adjustStock: (id: string, location: 'warehouse' | 'shop' | 'van', delta: number, reason?: string) => Promise<void>;
@@ -354,9 +372,13 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     [run]
   );
 
+  // Sends a PATCH with only the allowed keys that were given. Undefined means "leave it
+  // unchanged" and is dropped; an explicit null is kept so it clears the field.
   const updateCustomer = useCallback(
-    async (id: string, input: Partial<CustomerDto>) => {
-      await run(['customers'], () => erpApi.updateCustomer(id, input), 'Customer updated');
+    async (id: string, input: CustomerPatch) => {
+      const changes = pickCustomerPatch(input);
+      const saved = await run(['customers'], () => erpApi.patchCustomer(id, changes), 'Customer updated');
+      return saved !== undefined;
     },
     [run]
   );

@@ -15,6 +15,9 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.test.context.support.WithMockUser;
+import com.transmute.erp.auth.TestRequestDefaults;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -39,6 +42,8 @@ import org.springframework.test.web.servlet.MvcResult;
         "management.health.mail.enabled=false"
 })
 @AutoConfigureMockMvc
+@Import(TestRequestDefaults.class)
+@WithMockUser
 class ValidationAndRulesTest {
 
     /** Reminder emails are captured here instead of being sent. */

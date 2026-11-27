@@ -4,10 +4,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -20,11 +23,19 @@ import org.springframework.stereotype.Service;
 @Service
 public class HaikuService {
 
+    private static final Logger log = LoggerFactory.getLogger(HaikuService.class);
+
     /** The haiku for one day. {@code source} is "ai" when a model wrote it, else "fixed". */
     public record DailyHaiku(String date, List<String> lines, String source) {
     }
 
     private static final Duration RETRY_AFTER = Duration.ofMinutes(10);
+
+    /** Only dates this many days before or after today may call the model. */
+    private static final int WINDOW_DAYS = 1;
+
+    /** Most AI haikus kept in memory. When there are more, the oldest date is dropped. */
+    private static final int MAX_CACHED = 30;
 
     private static final List<List<String>> FIXED = List.of(
             List.of("Pallets at the dock", "manifests checked against the truck", "the route starts at dawn"),
@@ -57,6 +68,21 @@ public class HaikuService {
     /** When the model last failed for a date. Until the cooldown passes, the fixed verse is used. */
     private final Map<LocalDate, Instant> lastFailure = new ConcurrentHashMap<>();
 
+    /**
+     * One lock object per date. A request for a date holds only that date's lock while it calls
+     * the model, so two first requests for the same day call it once, and other days never wait.
+     * Locks are never removed: a lock may be held or awaited by another thread, and removing it
+     * would let a second thread call the model for the same date. Only in-window dates get a
+     * lock, so this map grows by one small object per day that is served.
+     */
+    private final Map<LocalDate, Object> dateLocks = new ConcurrentHashMap<>();
+
+    /** Guards trimming of the cache so that concurrent inserts do not overshoot {@link #MAX_CACHED}. */
+    private final Object cacheLock = new Object();
+
+    /** Entries for dates older than this many days before today are dropped. */
+    private static final int KEEP_DAYS = 2;
+
     @Autowired
     public HaikuService(GroqHaikuClient ai) {
         this(ai, Clock.systemUTC());
@@ -67,24 +93,61 @@ public class HaikuService {
         this.clock = clock;
     }
 
-    public synchronized DailyHaiku forDate(LocalDate date) {
+    public DailyHaiku forDate(LocalDate date) {
+        prune();
         DailyHaiku cached = today.get(date);
         if (cached != null) {
             return cached;
         }
-        Instant failed = lastFailure.get(date);
-        if (failed != null && clock.instant().isBefore(failed.plus(RETRY_AFTER))) {
+        // Dates outside the window never reach the model and are never cached.
+        LocalDate now = LocalDate.now(clock);
+        if (date.isBefore(now.minusDays(WINDOW_DAYS)) || date.isAfter(now.plusDays(WINDOW_DAYS))) {
             return fixed(date);
         }
-        Optional<List<String>> written = ai.writeHaiku(date.toString());
-        if (written.isPresent()) {
-            DailyHaiku haiku = new DailyHaiku(date.toString(), written.get(), "ai");
-            today.put(date, haiku);
-            lastFailure.remove(date);
-            return haiku;
+        // Only this date is locked while the model is called. Other dates are not blocked.
+        Object lock = dateLocks.computeIfAbsent(date, d -> new Object());
+        synchronized (lock) {
+            cached = today.get(date);
+            if (cached != null) {
+                return cached;
+            }
+            Instant failed = lastFailure.get(date);
+            if (failed != null && clock.instant().isBefore(failed.plus(RETRY_AFTER))) {
+                return fixed(date);
+            }
+            Optional<List<String>> written;
+            try {
+                written = ai.writeHaiku(date.toString());
+            } catch (RuntimeException e) {
+                log.warn("Haiku model call failed for {}, using the fixed verse", date, e);
+                written = Optional.empty();
+            }
+            if (written.isPresent()) {
+                DailyHaiku haiku = new DailyHaiku(date.toString(), written.get(), "ai");
+                remember(date, haiku);
+                lastFailure.remove(date);
+                return haiku;
+            }
+            lastFailure.put(date, clock.instant());
+            return fixed(date);
         }
-        lastFailure.put(date, clock.instant());
-        return fixed(date);
+    }
+
+    /** Caches an AI haiku and drops the oldest dates while the cache is over {@link #MAX_CACHED}. */
+    private void remember(LocalDate date, DailyHaiku haiku) {
+        synchronized (cacheLock) {
+            today.put(date, haiku);
+            while (today.size() > MAX_CACHED) {
+                today.keySet().stream().min(Comparator.naturalOrder()).ifPresent(today::remove);
+            }
+        }
+    }
+
+    /** Drops cache and failure entries for dates older than {@link #KEEP_DAYS} days. */
+    private void prune() {
+        LocalDate cutoff = LocalDate.now(clock).minusDays(KEEP_DAYS);
+        today.keySet().removeIf(d -> d.isBefore(cutoff));
+        lastFailure.keySet().removeIf(d -> d.isBefore(cutoff));
     }
 
     private DailyHaiku fixed(LocalDate date) {

@@ -35,11 +35,33 @@ public class CustomerService {
         return customers.findById(id).orElseThrow(() -> new NotFoundException("Customer", id));
     }
 
+    /**
+     * Creates a customer. Balance, credit limit and overdue days may be supplied as opening
+     * values, but never negative.
+     */
     public Customer create(Customer input) {
+        if (input.getOutstandingBalance() != null && input.getOutstandingBalance().signum() < 0) {
+            throw new BadRequestException("Outstanding balance cannot be negative");
+        }
+        if (input.getCreditLimit() != null && input.getCreditLimit().signum() < 0) {
+            throw new BadRequestException("Credit limit cannot be negative");
+        }
+        if (input.getDaysOverdue() < 0) {
+            throw new BadRequestException("Days overdue cannot be negative");
+        }
         input.setId(Ids.next("CUST"));
+        input.setVersion(null);
         return customers.save(input);
     }
 
+    /**
+     * Updates the descriptive fields of a customer: name, contact person, phone, email, city and
+     * category. Balances, credit limit, overdue days, risk, average pay days, last order date and
+     * the AI risk note are server-owned and are never taken from the request body. They change
+     * only through invoices, payments and the risk process, so a client cannot zero a debt, raise
+     * a credit limit, or revert a concurrent update by sending a stale copy of the record. The
+     * credit limit is left out of PUT until the owner decides it should be editable here.
+     */
     public Customer update(String id, Customer input) {
         Customer existing = get(id);
         existing.setName(input.getName());
@@ -48,13 +70,6 @@ public class CustomerService {
         existing.setEmail(input.getEmail());
         existing.setCity(input.getCity());
         existing.setCategory(input.getCategory());
-        existing.setOutstandingBalance(input.getOutstandingBalance());
-        existing.setCreditLimit(input.getCreditLimit());
-        existing.setDaysOverdue(input.getDaysOverdue());
-        existing.setRisk(input.getRisk());
-        existing.setAvgPayDays(input.getAvgPayDays());
-        existing.setLastOrderDate(input.getLastOrderDate());
-        existing.setAiRiskNote(input.getAiRiskNote());
         return existing;
     }
 

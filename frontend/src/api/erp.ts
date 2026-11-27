@@ -94,6 +94,7 @@ export interface BankLineInput {
 export const erpApi = {
   // Customers
   customers: () => apiGet<CustomerDto[]>('/api/customers'),
+  getCustomer: (id: string) => apiGet<CustomerDto>(`/api/customers/${id}`),
   createCustomer: (body: Partial<CustomerDto>) => apiSend<CustomerDto>('POST', '/api/customers', body),
   updateCustomer: (id: string, body: Partial<CustomerDto>) => apiSend<CustomerDto>('PUT', `/api/customers/${id}`, body),
 

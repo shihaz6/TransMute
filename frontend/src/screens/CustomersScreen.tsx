@@ -3,8 +3,10 @@ import {
   ArrowLeft,
   Bell,
   CreditCard,
+  Mail,
   MapPin,
   MessageSquare,
+  Pencil,
   Phone,
   ShoppingBag,
   Sparkles,
@@ -12,11 +14,15 @@ import {
   Wallet,
 } from 'lucide-react';
 import { useErp } from '@/context/ErpContext';
+import { erpApi } from '@/api/erp';
+import { ApiError } from '@/api/client';
 import {
   Button,
   Card,
   cn,
   EmptyState,
+  Input,
+  Modal,
   PageHeader,
   SearchInput,
   StatusChip,
@@ -29,6 +35,9 @@ function utilisationPct(balance: number, limit: number): number {
   return limit > 0 ? Math.round((balance / limit) * 100) : 0;
 }
 
+// Simple check: something@something.something, no spaces. Empty is handled separately.
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function CustomersScreen() {
   const {
     customers,
@@ -36,11 +45,19 @@ export function CustomersScreen() {
     setSelectedCustomerId,
     navigateToEntity,
     setRoute,
+    reload,
   } = useErp();
 
   const [search, setSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState<'all' | PaymentRisk>('all');
   const [timelineFilter, setTimelineFilter] = useState<'all' | 'order' | 'payment' | 'whatsapp' | 'reminder'>('all');
+
+  // Edit contact (phone and email) form state.
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactPhone, setContactPhone] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactError, setContactError] = useState<string | null>(null);
+  const [contactSaving, setContactSaving] = useState(false);
 
   const activeCustomer = useMemo(
     () => customers.find((c) => c.id === selectedCustomerId) || null,
@@ -61,6 +78,42 @@ export function CustomersScreen() {
       return true;
     });
   }, [customers, riskFilter, search]);
+
+  const openContactForm = () => {
+    if (!activeCustomer) return;
+    setContactPhone(activeCustomer.phone);
+    setContactEmail(activeCustomer.email);
+    setContactError(null);
+    setContactOpen(true);
+  };
+
+  // The backend PUT copies every field, so send the full stored record with only
+  // phone and email changed. Otherwise balances and limits would be overwritten.
+  const saveContact = async () => {
+    if (!activeCustomer) return;
+    const phone = contactPhone.trim();
+    const email = contactEmail.trim();
+    if (email && !EMAIL_PATTERN.test(email)) {
+      setContactError('Enter a valid email address, such as name@example.com.');
+      return;
+    }
+    setContactSaving(true);
+    setContactError(null);
+    try {
+      const current = await erpApi.getCustomer(activeCustomer.id);
+      await erpApi.updateCustomer(activeCustomer.id, {
+        ...current,
+        phone: phone || null,
+        email: email || null,
+      });
+      await reload();
+      setContactOpen(false);
+    } catch (error) {
+      setContactError(error instanceof ApiError ? error.message : 'Could not save the contact details.');
+    } finally {
+      setContactSaving(false);
+    }
+  };
 
   const riskChip = (risk: PaymentRisk) => {
     if (risk === 'high') return <StatusChip label="High Risk" tone="red" />;
@@ -107,6 +160,11 @@ export function CustomersScreen() {
                 <span className="flex items-center gap-1">
                   <Phone className="w-3 h-3" /> {activeCustomer.phone}
                 </span>
+                {activeCustomer.email && (
+                  <span className="flex items-center gap-1">
+                    <Mail className="w-3 h-3" /> {activeCustomer.email}
+                  </span>
+                )}
                 <span className="flex items-center gap-1">
                   <MapPin className="w-3 h-3" /> {activeCustomer.city}
                 </span>
@@ -114,6 +172,14 @@ export function CustomersScreen() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Pencil className="w-4 h-4" />}
+              onClick={openContactForm}
+            >
+              Edit contact
+            </Button>
             <Button
               variant="gold"
               size="sm"
@@ -124,6 +190,52 @@ export function CustomersScreen() {
             </Button>
           </div>
         </div>
+
+        <Modal
+          open={contactOpen}
+          onClose={() => setContactOpen(false)}
+          title="Edit contact"
+          subtitle={activeCustomer.name}
+          maxWidth="max-w-md"
+          footer={
+            <>
+              <Button variant="secondary" size="sm" onClick={() => setContactOpen(false)} disabled={contactSaving}>
+                Cancel
+              </Button>
+              <Button variant="primary" size="sm" onClick={saveContact} disabled={contactSaving}>
+                {contactSaving ? 'Saving...' : 'Save'}
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <label className="block">
+              <span className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Phone</span>
+              <Input
+                type="tel"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                placeholder="e.g. 0300 1234567"
+                icon={<Phone className="w-4 h-4" />}
+              />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Email</span>
+              <Input
+                type="email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                placeholder="name@example.com"
+                icon={<Mail className="w-4 h-4" />}
+              />
+            </label>
+            {contactError && (
+              <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+                {contactError}
+              </p>
+            )}
+          </div>
+        </Modal>
 
         {/* Balance & Credit Summary */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

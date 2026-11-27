@@ -237,8 +237,11 @@ public class DocumentService {
         doc.setThreeWayMatch(ThreeWayMatcher.match(doc.getInvoiceNumber(), doc.getLineItems(), candidates));
     }
 
-    /** Approves a document once the supplier, invoice number and total are filled in. */
-    public InboxDocument approve(String id) {
+    /**
+     * Approves a document once the supplier, invoice number and total are filled in. The three-way
+     * match must be "matched", unless the owner passes overrideMatch, which is recorded in the audit log.
+     */
+    public InboxDocument approve(String id, boolean overrideMatch) {
         InboxDocument doc = get(id);
         requireNeedsReview(doc, "Only documents waiting for review can be approved");
         boolean complete = notBlank(doc.getSupplier()) && notBlank(doc.getInvoiceNumber())
@@ -246,12 +249,25 @@ public class DocumentService {
         if (!complete) {
             throw new BadRequestException("Enter the supplier, invoice number and total before approving");
         }
+        String status = matchStatus(doc);
+        boolean matched = doc.getThreeWayMatch() != null && "matched".equals(doc.getThreeWayMatch().status());
+        if (!matched && !overrideMatch) {
+            throw new BadRequestException("Three-way match is " + status
+                    + ". Approve anyway with the owner override to continue.");
+        }
         doc.setStatus("approved");
         doc.setOverallConfidence(100);
-        audit.record("Documents",
-                "Approved invoice " + doc.getInvoiceNumber() + " from " + doc.getSupplier(),
-                "Owner verified the invoice fields. Three-way match: " + matchStatus(doc) + ".",
-                null, "Owner", "approved");
+        if (matched) {
+            audit.record("Documents",
+                    "Approved invoice " + doc.getInvoiceNumber() + " from " + doc.getSupplier(),
+                    "Owner verified the invoice fields. Three-way match: " + status + ".",
+                    null, "Owner", "approved");
+        } else {
+            audit.record("Documents",
+                    "Approved invoice " + doc.getInvoiceNumber() + " despite match status " + status,
+                    "Owner override of the three-way match.",
+                    null, "Owner", "approved");
+        }
         return doc;
     }
 

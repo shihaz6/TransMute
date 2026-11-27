@@ -61,6 +61,7 @@ export function toCustomer(d: CustomerDto): Customer {
     name: d.name,
     contactPerson: d.contactPerson ?? '',
     phone: d.phone ?? '',
+    email: d.email ?? '',
     city: d.city ?? '',
     category: (d.category ?? 'Grocery / Retail') as Customer['category'],
     outstandingBalance: d.outstandingBalance,

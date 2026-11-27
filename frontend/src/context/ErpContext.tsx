@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import {
   AIActionLogEntry,
   AIAutomationSetting,
@@ -187,7 +187,8 @@ interface ErpContextValue {
   createOrder: (input: OrderCreateInput) => Promise<SalesOrderDto | undefined>;
   replaceQuoteItems: (id: string, lines: OrderLineInput[]) => Promise<boolean>;
   convertQuote: (id: string) => Promise<void>;
-  confirmOrder: (id: string) => Promise<void>;
+  /** creditOverride=true is the owner override for an order held at pending-review. */
+  confirmOrder: (id: string, creditOverride?: boolean) => Promise<void>;
   sendPurchaseOrder: (id: string) => Promise<void>;
   receivePurchaseOrder: (id: string, receipt: ReceiptInput) => Promise<void>;
   uploadDocuments: (files: File[], channel?: string) => Promise<string | undefined>;
@@ -283,49 +284,110 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     if (r === 'alerts' && entityId) setSelectedAlertId(entityId);
   }, []);
 
-  /** Fetches one list from the backend and maps it to the UI type. */
-  const loadSlice = useCallback(async (slice: Slice) => {
+  /** Latest request number per slice. Only the newest response for a slice is applied. */
+  const sliceRequestSeq = useRef<Map<Slice, number>>(new Map());
+
+  /** Fetches one list from the backend and returns a function that applies it to state. */
+  const fetchSlice = useCallback(async (slice: Slice): Promise<() => void> => {
     switch (slice) {
-      case 'customers':
-        return setCustomers((await erpApi.customers()).map(toCustomer));
-      case 'orders':
-        return setOrders((await erpApi.orders()).map(toSalesOrder));
-      case 'inventory':
-        return setInventory((await erpApi.inventory()).map(toInventoryItem));
-      case 'suppliers':
-        return setSuppliers((await erpApi.suppliers()).map(toSupplier));
-      case 'pos':
-        return setPos((await erpApi.purchaseOrders()).map(toPurchaseOrder));
-      case 'grns':
-        return setGrns((await erpApi.goodsReceivedNotes()).map(toGoodsReceivedNote));
-      case 'documents':
-        return setDocuments((await erpApi.documents()).map(toInboxDocument));
-      case 'collections':
-        return setCollections((await erpApi.collections()).map(toCollectionItem));
-      case 'ledger':
-        return setLedger((await erpApi.ledger()).map(toLedgerEntry));
-      case 'payments':
-        return setPayments((await erpApi.payments()).map(toPaymentRecord));
-      case 'bankRecon':
-        return setBankRecon((await erpApi.bankLines()).map(toBankLine));
-      case 'alerts':
-        return setAlerts((await erpApi.alerts()).map(toAlert));
-      case 'audit':
-        return setAiLogs((await erpApi.auditLog()).map(toAuditEntry));
-      case 'approvalRules':
-        return setApprovalRules((await erpApi.approvalRules()).map(toApprovalRule));
-      case 'aiSettings':
-        return setAiSettings((await erpApi.aiSettings()).map(toAiSetting));
-      case 'catalyst':
-        return setCatalystMessages((await erpApi.catalystMessages()).map(toCatalystMessage));
+      case 'customers': {
+        const rows = (await erpApi.customers()).map(toCustomer);
+        return () => setCustomers(rows);
+      }
+      case 'orders': {
+        const rows = (await erpApi.orders()).map(toSalesOrder);
+        return () => setOrders(rows);
+      }
+      case 'inventory': {
+        const rows = (await erpApi.inventory()).map(toInventoryItem);
+        return () => setInventory(rows);
+      }
+      case 'suppliers': {
+        const rows = (await erpApi.suppliers()).map(toSupplier);
+        return () => setSuppliers(rows);
+      }
+      case 'pos': {
+        const rows = (await erpApi.purchaseOrders()).map(toPurchaseOrder);
+        return () => setPos(rows);
+      }
+      case 'grns': {
+        const rows = (await erpApi.goodsReceivedNotes()).map(toGoodsReceivedNote);
+        return () => setGrns(rows);
+      }
+      case 'documents': {
+        const rows = (await erpApi.documents()).map(toInboxDocument);
+        return () => setDocuments(rows);
+      }
+      case 'collections': {
+        const rows = (await erpApi.collections()).map(toCollectionItem);
+        return () => setCollections(rows);
+      }
+      case 'ledger': {
+        const rows = (await erpApi.ledger()).map(toLedgerEntry);
+        return () => setLedger(rows);
+      }
+      case 'payments': {
+        const rows = (await erpApi.payments()).map(toPaymentRecord);
+        return () => setPayments(rows);
+      }
+      case 'bankRecon': {
+        const rows = (await erpApi.bankLines()).map(toBankLine);
+        return () => setBankRecon(rows);
+      }
+      case 'alerts': {
+        const rows = (await erpApi.alerts()).map(toAlert);
+        return () => setAlerts(rows);
+      }
+      case 'audit': {
+        const rows = (await erpApi.auditLog()).map(toAuditEntry);
+        return () => setAiLogs(rows);
+      }
+      case 'approvalRules': {
+        const rows = (await erpApi.approvalRules()).map(toApprovalRule);
+        return () => setApprovalRules(rows);
+      }
+      case 'aiSettings': {
+        const rows = (await erpApi.aiSettings()).map(toAiSetting);
+        return () => setAiSettings(rows);
+      }
+      case 'catalyst': {
+        const rows = (await erpApi.catalystMessages()).map(toCatalystMessage);
+        return () => setCatalystMessages(rows);
+      }
     }
   }, []);
+
+  /** Reloads one list. If a newer request for the same list started meanwhile, this response is dropped. */
+  const loadSlice = useCallback(
+    async (slice: Slice) => {
+      const seq = (sliceRequestSeq.current.get(slice) ?? 0) + 1;
+      sliceRequestSeq.current.set(slice, seq);
+      const apply = await fetchSlice(slice);
+      if (sliceRequestSeq.current.get(slice) === seq) apply();
+    },
+    [fetchSlice]
+  );
 
   const refresh = useCallback(
     async (slices: Slice[]) => {
       await Promise.all(slices.map((s) => loadSlice(s)));
     },
     [loadSlice]
+  );
+
+  /** Refreshes lists after a successful write. A failed refresh warns instead of reporting the write as failed. */
+  const refreshAfterWrite = useCallback(
+    async (slices: Slice[]) => {
+      try {
+        await refresh(slices);
+      } catch {
+        addToast({
+          title: 'Saved, but the screen could not refresh. Reload to see the latest.',
+          variant: 'warning',
+        });
+      }
+    },
+    [refresh, addToast]
   );
 
   const reload = useCallback(async () => {
@@ -350,17 +412,18 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
    */
   const run = useCallback(
     async <T,>(slices: Slice[], work: () => Promise<T>, success?: string): Promise<T | undefined> => {
+      let result: T;
       try {
-        const result = await work();
-        await refresh(slices);
-        if (success) addToast({ title: success, variant: 'success' });
-        return result;
+        result = await work();
       } catch (error) {
         addToast({ title: 'Could not complete that', description: errorMessage(error), variant: 'error' });
         return undefined;
       }
+      await refreshAfterWrite(slices);
+      if (success) addToast({ title: success, variant: 'success' });
+      return result;
     },
-    [refresh, addToast]
+    [refreshAfterWrite, addToast]
   );
 
   // ----- Customers and inventory -----
@@ -442,11 +505,22 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     [run]
   );
 
+  // The backend holds an order over its credit limit as pending-review and does not invoice it.
+  // Only an owner override (creditOverride) invoices it, so the success toast depends on the returned status.
   const confirmOrder = useCallback(
-    async (id: string) => {
-      await run(['orders', 'customers', 'audit'], () => erpApi.confirmOrder(id), 'Order confirmed and invoiced');
+    async (id: string, creditOverride = false) => {
+      const confirmed = await run(['orders', 'customers', 'audit'], () => erpApi.confirmOrder(id, creditOverride));
+      if (!confirmed) return;
+      if (confirmed.status === 'pending-review') {
+        addToast({
+          title: 'Held for credit review. Confirm again with the owner override to invoice.',
+          variant: 'warning',
+        });
+      } else {
+        addToast({ title: 'Order confirmed and invoiced', variant: 'success' });
+      }
     },
-    [run]
+    [run, addToast]
   );
 
   // ----- Purchasing -----
@@ -468,19 +542,33 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
   // ----- Documents -----
 
   const uploadDocuments = useCallback(
-    async (files: File[], channel = 'upload') =>
-      run(
-        ['documents', 'audit'],
-        async () => {
-          let lastId: string | undefined;
-          for (const file of files) {
-            lastId = (await erpApi.uploadDocument(file, channel)).id;
-          }
-          return lastId;
-        },
-        files.length === 1 ? 'Document added to review' : `${files.length} documents added to review`
-      ),
-    [run]
+    async (files: File[], channel = 'upload'): Promise<string | undefined> => {
+      let lastId: string | undefined;
+      let uploaded = 0;
+      const failures: string[] = [];
+      for (const file of files) {
+        try {
+          lastId = (await erpApi.uploadDocument(file, channel)).id;
+          uploaded += 1;
+        } catch (error) {
+          failures.push(errorMessage(error));
+        }
+      }
+      if (uploaded > 0) await refreshAfterWrite(['documents', 'audit']);
+      if (failures.length === 0) {
+        addToast({
+          title: files.length === 1 ? 'Document added to review' : `${files.length} documents added to review`,
+          variant: 'success',
+        });
+      } else {
+        addToast({
+          title: `${uploaded} uploaded, ${failures.length} failed: ${failures[0]}`,
+          variant: 'error',
+        });
+      }
+      return lastId;
+    },
+    [refreshAfterWrite, addToast]
   );
 
   const updateDocumentFields = useCallback(
@@ -546,14 +634,22 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
 
   const recordPayment = useCallback(
     async (input: PaymentInput) => {
-      await run(['payments', 'ledger', 'audit'], () => erpApi.recordPayment(input), 'Payment recorded');
+      await run(
+        ['payments', 'ledger', 'customers', 'collections', 'audit'],
+        () => erpApi.recordPayment(input),
+        'Payment recorded'
+      );
     },
     [run]
   );
 
   const updateChequeStatus = useCallback(
     async (paymentId: string, status: ChequeStatus) => {
-      await run(['payments', 'ledger', 'audit'], () => erpApi.setChequeStatus(paymentId, status), `Cheque marked ${status}`);
+      await run(
+        ['payments', 'ledger', 'customers', 'collections', 'audit'],
+        () => erpApi.setChequeStatus(paymentId, status),
+        `Cheque marked ${status}`
+      );
     },
     [run]
   );
@@ -567,7 +663,11 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
 
   const acceptBankMatch = useCallback(
     async (itemId: string) => {
-      await run(['bankRecon', 'ledger', 'audit'], () => erpApi.acceptBankLine(itemId), 'Bank transaction reconciled');
+      await run(
+        ['bankRecon', 'ledger', 'customers', 'collections', 'audit'],
+        () => erpApi.acceptBankLine(itemId),
+        'Bank transaction reconciled'
+      );
     },
     [run]
   );

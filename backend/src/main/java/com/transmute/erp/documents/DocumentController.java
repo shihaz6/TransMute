@@ -69,14 +69,24 @@ public class DocumentController {
     public ResponseEntity<Resource> file(@PathVariable String id) throws IOException {
         InboxDocument doc = service.metadata(id);
         Path path = service.fileOf(id);
-        MediaType type = doc.getContentType() == null
-                ? MediaType.APPLICATION_OCTET_STREAM
-                : MediaType.parseMediaType(doc.getContentType());
+        // Only the canonical PDF and image types are served as stored. Anything else is sent as a
+        // download, so the browser never renders a document's markup on this origin.
+        boolean inline = UploadTypes.isInline(doc.getContentType());
+        MediaType type = inline ? MediaType.parseMediaType(doc.getContentType()) : MediaType.APPLICATION_OCTET_STREAM;
+        ContentDisposition disposition = (inline ? ContentDisposition.inline() : ContentDisposition.attachment())
+                .filename(doc.getFileName())
+                .build();
+        // The sandbox directive stops the page running scripts, but it also stops browsers rendering
+        // inline PDFs, so PDFs get the policy without it. Images keep the full sandbox.
+        String csp = MediaType.APPLICATION_PDF.equalsTypeAndSubtype(type)
+                ? "default-src 'none'"
+                : "default-src 'none'; sandbox";
         return ResponseEntity.ok()
                 .contentType(type)
                 .contentLength(Files.size(path))
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        ContentDisposition.inline().filename(doc.getFileName()).build().toString())
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .header("X-Content-Type-Options", "nosniff")
+                .header("Content-Security-Policy", csp)
                 .body(new FileSystemResource(path));
     }
 }

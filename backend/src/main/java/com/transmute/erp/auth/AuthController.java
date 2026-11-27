@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import java.util.Locale;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -36,25 +37,38 @@ public class AuthController {
 
     private final AuthenticationManager authenticationManager;
     private final AppUserRepository users;
+    private final LoginThrottle throttle;
     private final HttpSessionSecurityContextRepository sessions = new HttpSessionSecurityContextRepository();
 
-    public AuthController(AuthenticationManager authenticationManager, AppUserRepository users) {
+    public AuthController(AuthenticationManager authenticationManager, AppUserRepository users,
+                          LoginThrottle throttle) {
         this.authenticationManager = authenticationManager;
         this.users = users;
+        this.throttle = throttle;
     }
 
     @PostMapping("/login")
     public ResponseEntity<Object> login(@Valid @RequestBody LoginRequest body,
                                         HttpServletRequest request, HttpServletResponse response) {
+        String userKey = "user:" + body.username().toLowerCase(Locale.ROOT);
+        String ipKey = "ip:" + request.getRemoteAddr();
+        if (throttle.isBlocked(userKey) || throttle.isBlocked(ipKey)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(Map.of("status", 429,
+                            "message", "Too many sign-in attempts. Wait 15 minutes and try again."));
+        }
         Authentication auth;
         try {
             auth = authenticationManager.authenticate(
                     UsernamePasswordAuthenticationToken.unauthenticated(body.username(), body.password()));
         } catch (BadCredentialsException | UsernameNotFoundException e) {
+            throttle.recordFailure(userKey);
+            throttle.recordFailure(ipKey);
             // Same answer for a wrong password and an unknown account, so usernames are not revealed.
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("status", 401, "message", "Wrong username or password"));
         }
+        throttle.reset(userKey);
         if (request.getSession(false) != null) {
             request.changeSessionId();
         }

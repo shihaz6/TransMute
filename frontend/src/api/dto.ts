@@ -322,3 +322,10 @@ export interface DashboardSummaryDto {
   openAlerts: number;
   lowStockItems: number;
 }
+
+/** The signed-in account, from /api/auth/me and /api/auth/login. */
+export interface AuthUserDto {
+  username: string;
+  displayName: string;
+  role: string;
+}

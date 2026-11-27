@@ -36,6 +36,7 @@ public class CustomerService {
         existing.setName(input.getName());
         existing.setContactPerson(input.getContactPerson());
         existing.setPhone(input.getPhone());
+        existing.setEmail(input.getEmail());
         existing.setCity(input.getCity());
         existing.setCategory(input.getCategory());
         existing.setOutstandingBalance(input.getOutstandingBalance());

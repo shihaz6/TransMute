@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.PositiveOrZero;
 import java.math.BigDecimal;
@@ -48,8 +49,15 @@ public class Customer {
     @Column(length = 2000)
     private String aiRiskNote;
 
+    /** Optimistic-lock version. Managed by JPA; concurrent updates of the same row fail instead of overwriting. */
+    @Version
+    private Long version;
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
+
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }

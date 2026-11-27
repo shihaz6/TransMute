@@ -12,9 +12,13 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Stream;
 import org.springframework.mail.MailException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 @Transactional
@@ -22,6 +26,7 @@ public class CollectionService {
 
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.ENGLISH);
     private static final List<String> TONES = List.of("friendly", "firm", "final");
+    private static final int SEND_LOCK_STRIPES = 64;
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CollectionService.class);
 
@@ -29,13 +34,17 @@ public class CollectionService {
     private final CustomerService customers;
     private final AuditService audit;
     private final ReminderMailer mailer;
+    private final TransactionTemplate tx;
+    // Striped locks held by markSent across the status check, the email and the commit.
+    private final Object[] sendLocks = Stream.generate(Object::new).limit(SEND_LOCK_STRIPES).toArray();
 
     public CollectionService(CollectionItemRepository items, CustomerService customers, AuditService audit,
-                             ReminderMailer mailer) {
+                             ReminderMailer mailer, PlatformTransactionManager transactions) {
         this.items = items;
         this.customers = customers;
         this.audit = audit;
         this.mailer = mailer;
+        this.tx = new TransactionTemplate(transactions);
     }
 
     @Transactional(readOnly = true)
@@ -53,7 +62,8 @@ public class CollectionService {
             if (c.getDaysOverdue() <= 0 || c.getOutstandingBalance().signum() <= 0) {
                 continue;
             }
-            if (items.existsByCustomerIdAndStatusNot(c.getId(), "sent")) {
+            if (items.existsByCustomerIdAndStatusNot(c.getId(), "sent")
+                    || items.existsByCustomerIdAndStatusIn(c.getId(), List.of("sent", "promised"))) {
                 continue;
             }
             CollectionItem item = new CollectionItem();
@@ -98,8 +108,23 @@ public class CollectionService {
     /**
      * Emails the approved reminder to the customer, then records it as sent. Fails without
      * changing anything if the customer has no email or the server's mail is not set up.
+     * The status is re-read and the status change committed while holding a lock for this item,
+     * so concurrent sends in this JVM email the customer once. The lock does not span server instances.
+     * <p>
+     * Ordering note: the email is sent inside the database transaction, before it commits. If the
+     * commit fails after the email has gone out, the item stays unsent and a retry emails the customer
+     * again. Sending after commit would avoid that but could leave a recorded "sent" with no email, so
+     * the order is kept. The per-JVM lock also does not prevent duplicates across multiple server instances.
      */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public CollectionItem markSent(String id) {
+        Object lock = sendLocks[Math.floorMod(id.hashCode(), SEND_LOCK_STRIPES)];
+        synchronized (lock) {
+            return tx.execute(status -> sendAndRecord(id));
+        }
+    }
+
+    private CollectionItem sendAndRecord(String id) {
         CollectionItem item = get(id);
         if ("sent".equals(item.getStatus()) || "promised".equals(item.getStatus())) {
             throw new BadRequestException("This reminder has already been sent");
@@ -131,8 +156,14 @@ public class CollectionService {
         if (date == null) {
             throw new BadRequestException("A promise needs a date");
         }
+        if (amount != null && amount.signum() < 0) {
+            throw new BadRequestException("Promise amount cannot be negative");
+        }
         BigDecimal promised = amount != null ? amount
                 : item.getOverdueAmount().divide(BigDecimal.valueOf(2));
+        if (promised.compareTo(item.getOverdueAmount()) > 0) {
+            throw new BadRequestException("Promise amount cannot be more than the overdue amount");
+        }
         item.setStatus("promised");
         item.setPromisedDate(date);
         item.setPromisedAmount(promised);

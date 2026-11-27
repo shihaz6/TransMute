@@ -5,6 +5,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { AIActionLogDrawer } from '@/components/overlays/AIActionLogDrawer';
 import { CatalystPanel } from '@/components/overlays/CatalystPanel';
 import { ToastContainer } from '@/components/ui/Primitives';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 const DashboardScreen = lazy(() => import('@/screens/DashboardScreen').then((m) => ({ default: m.DashboardScreen })));
 const DocumentsScreen = lazy(() => import('@/screens/DocumentsScreen').then((m) => ({ default: m.DocumentsScreen })));
@@ -74,15 +75,18 @@ function TransmuteRouter() {
   return (
     <>
       <AppShell>
-        <Suspense
-          fallback={
-            <div className="flex h-full min-h-[40vh] items-center justify-center text-sm text-stone-500 dark:text-zinc-400">
-              Loading...
-            </div>
-          }
-        >
-          {renderScreen()}
-        </Suspense>
+        {/* Keyed by route so a failed screen resets when the user navigates elsewhere. */}
+        <ErrorBoundary key={route}>
+          <Suspense
+            fallback={
+              <div className="flex h-full min-h-[40vh] items-center justify-center text-sm text-stone-500 dark:text-zinc-400">
+                Loading...
+              </div>
+            }
+          >
+            {renderScreen()}
+          </Suspense>
+        </ErrorBoundary>
       </AppShell>
       <BackendNotice />
       <AIActionLogDrawer />

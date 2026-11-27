@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -38,11 +39,14 @@ public class DocumentService {
     private final InboxDocumentRepository documents;
     private final AuditService audit;
     private final Path storageDir;
+    private final InvoiceExtractor extractor;
 
     public DocumentService(InboxDocumentRepository documents, AuditService audit,
+                           InvoiceExtractor extractor,
                            @Value("${transmute.storage.dir}") String storageDir) {
         this.documents = documents;
         this.audit = audit;
+        this.extractor = extractor;
         this.storageDir = Path.of(storageDir).toAbsolutePath().normalize();
     }
 
@@ -57,8 +61,8 @@ public class DocumentService {
     }
 
     /**
-     * Stores an uploaded file and creates an inbox record for it. No values are extracted
-     * from the file, so the record starts in needs-review with empty fields.
+     * Stores an uploaded file and creates an inbox record for it. If a vision model is configured,
+     * blank invoice fields are filled from the image. The record always stays in needs-review.
      */
     public InboxDocument store(MultipartFile file, String channel) {
         if (file == null || file.isEmpty()) {
@@ -91,12 +95,73 @@ public class DocumentService {
         doc.setSender("Uploaded manually");
         doc.setStatus("needs-review");
         doc.setPhoto(file.getContentType() != null && file.getContentType().startsWith("image/"));
-        doc.setFailureReason("Automatic extraction is not connected. Enter the invoice fields manually.");
+        doc.setFailureReason("Fields not read from the file. Enter the invoice fields manually.");
         InboxDocument saved = documents.save(doc);
 
+        boolean read = extractor.extract(target, doc.getContentType())
+                .map(fields -> applyExtracted(saved, fields))
+                .orElse(false);
         audit.record("Documents", "Added document " + original + " to review",
-                "Stored from upload. Fields not extracted yet.", null, "Owner", "flagged");
+                read ? "Fields read from the file. Check them before approving."
+                        : "Stored from upload. Fields not read from the file.",
+                null, "Owner", "flagged");
         return saved;
+    }
+
+    /**
+     * Fills only the fields that are still blank, so anything a person typed is kept.
+     * Returns true if at least one field was filled.
+     */
+    private boolean applyExtracted(InboxDocument doc, InvoiceExtractor.Extracted f) {
+        boolean changed = false;
+        if (blank(doc.getSupplier()) && notBlank(f.supplier())) { doc.setSupplier(f.supplier()); changed = true; }
+        if (blank(doc.getInvoiceNumber()) && notBlank(f.invoiceNumber())) { doc.setInvoiceNumber(f.invoiceNumber()); changed = true; }
+        if (blank(doc.getSupplierAddress()) && notBlank(f.supplierAddress())) { doc.setSupplierAddress(f.supplierAddress()); changed = true; }
+        if (blank(doc.getSupplierNtn()) && notBlank(f.supplierNtn())) { doc.setSupplierNtn(f.supplierNtn()); changed = true; }
+        if (doc.getInvoiceDate() == null) {
+            LocalDate d = parseDate(f.invoiceDate());
+            if (d != null) { doc.setInvoiceDate(d); changed = true; }
+        }
+        if (doc.getDueDate() == null) {
+            LocalDate d = parseDate(f.dueDate());
+            if (d != null) { doc.setDueDate(d); changed = true; }
+        }
+        if (doc.getSubtotal().signum() == 0) {
+            BigDecimal v = parseAmount(f.subtotal());
+            if (v != null) { doc.setSubtotal(v); changed = true; }
+        }
+        if (doc.getTax().signum() == 0) {
+            BigDecimal v = parseAmount(f.tax());
+            if (v != null) { doc.setTax(v); changed = true; }
+        }
+        if (doc.getTotal().signum() == 0) {
+            BigDecimal v = parseAmount(f.total());
+            if (v != null) { doc.setTotal(v); changed = true; }
+        }
+        if (changed) {
+            doc.setFailureReason("Fields read from the file. Check them before approving.");
+        }
+        return changed;
+    }
+
+    private static LocalDate parseDate(String s) {
+        try {
+            return notBlank(s) ? LocalDate.parse(s.trim()) : null;
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
+    private static BigDecimal parseAmount(String s) {
+        try {
+            return notBlank(s) ? new BigDecimal(s.replace(",", "").trim()) : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static boolean blank(String s) {
+        return !notBlank(s);
     }
 
     public InboxDocument updateFields(String id, FieldUpdate update) {

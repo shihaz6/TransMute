@@ -14,8 +14,6 @@ import {
   Wallet,
 } from 'lucide-react';
 import { useErp } from '@/context/ErpContext';
-import { erpApi } from '@/api/erp';
-import { ApiError } from '@/api/client';
 import {
   Button,
   Card,
@@ -45,7 +43,7 @@ export function CustomersScreen() {
     setSelectedCustomerId,
     navigateToEntity,
     setRoute,
-    reload,
+    updateCustomer,
   } = useErp();
 
   const [search, setSearch] = useState('');
@@ -87,8 +85,7 @@ export function CustomersScreen() {
     setContactOpen(true);
   };
 
-  // The backend PUT copies every field, so send the full stored record with only
-  // phone and email changed. Otherwise balances and limits would be overwritten.
+  // Only phone and email are sent. The context reports save errors by toast.
   const saveContact = async () => {
     if (!activeCustomer) return;
     const phone = contactPhone.trim();
@@ -100,16 +97,11 @@ export function CustomersScreen() {
     setContactSaving(true);
     setContactError(null);
     try {
-      const current = await erpApi.getCustomer(activeCustomer.id);
-      await erpApi.updateCustomer(activeCustomer.id, {
-        ...current,
+      const saved = await updateCustomer(activeCustomer.id, {
         phone: phone || null,
         email: email || null,
       });
-      await reload();
-      setContactOpen(false);
-    } catch (error) {
-      setContactError(error instanceof ApiError ? error.message : 'Could not save the contact details.');
+      if (saved) setContactOpen(false);
     } finally {
       setContactSaving(false);
     }

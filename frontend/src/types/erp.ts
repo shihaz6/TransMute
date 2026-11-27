@@ -36,7 +36,7 @@ export interface InvoiceLineItem {
 }
 
 export interface ThreeWayMatch {
-  status: 'matched' | 'variance' | 'missing-grn';
+  status: 'matched' | 'variance' | 'missing-grn' | 'no-po';
   poNumber: string;
   grnNumber?: string;
   summary: string;

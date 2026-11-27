@@ -1,21 +1,22 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { ErpProvider, useErp } from '@/context/ErpContext';
 import { SignInGate } from '@/components/auth/SignInGate';
 import { AppShell } from '@/components/layout/AppShell';
 import { AIActionLogDrawer } from '@/components/overlays/AIActionLogDrawer';
 import { CatalystPanel } from '@/components/overlays/CatalystPanel';
 import { ToastContainer } from '@/components/ui/Primitives';
-import { DashboardScreen } from '@/screens/DashboardScreen';
-import { DocumentsScreen } from '@/screens/DocumentsScreen';
-import { OrdersScreen } from '@/screens/OrdersScreen';
-import { CustomersScreen } from '@/screens/CustomersScreen';
-import { CollectionsScreen } from '@/screens/CollectionsScreen';
-import { InventoryScreen } from '@/screens/InventoryScreen';
-import { PurchasingScreen } from '@/screens/PurchasingScreen';
-import { AccountingScreen } from '@/screens/AccountingScreen';
-import { AlertsScreen } from '@/screens/AlertsScreen';
-import { ReportsScreen } from '@/screens/ReportsScreen';
-import { SettingsScreen } from '@/screens/SettingsScreen';
+
+const DashboardScreen = lazy(() => import('@/screens/DashboardScreen').then((m) => ({ default: m.DashboardScreen })));
+const DocumentsScreen = lazy(() => import('@/screens/DocumentsScreen').then((m) => ({ default: m.DocumentsScreen })));
+const OrdersScreen = lazy(() => import('@/screens/OrdersScreen').then((m) => ({ default: m.OrdersScreen })));
+const CustomersScreen = lazy(() => import('@/screens/CustomersScreen').then((m) => ({ default: m.CustomersScreen })));
+const CollectionsScreen = lazy(() => import('@/screens/CollectionsScreen').then((m) => ({ default: m.CollectionsScreen })));
+const InventoryScreen = lazy(() => import('@/screens/InventoryScreen').then((m) => ({ default: m.InventoryScreen })));
+const PurchasingScreen = lazy(() => import('@/screens/PurchasingScreen').then((m) => ({ default: m.PurchasingScreen })));
+const AccountingScreen = lazy(() => import('@/screens/AccountingScreen').then((m) => ({ default: m.AccountingScreen })));
+const AlertsScreen = lazy(() => import('@/screens/AlertsScreen').then((m) => ({ default: m.AlertsScreen })));
+const ReportsScreen = lazy(() => import('@/screens/ReportsScreen').then((m) => ({ default: m.ReportsScreen })));
+const SettingsScreen = lazy(() => import('@/screens/SettingsScreen').then((m) => ({ default: m.SettingsScreen })));
 
 function BackendNotice() {
   const { loadError, loading, reload } = useErp();
@@ -72,7 +73,17 @@ function TransmuteRouter() {
 
   return (
     <>
-      <AppShell>{renderScreen()}</AppShell>
+      <AppShell>
+        <Suspense
+          fallback={
+            <div className="flex h-full min-h-[40vh] items-center justify-center text-sm text-stone-500 dark:text-zinc-400">
+              Loading...
+            </div>
+          }
+        >
+          {renderScreen()}
+        </Suspense>
+      </AppShell>
       <BackendNotice />
       <AIActionLogDrawer />
       <CatalystPanel />

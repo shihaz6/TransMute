@@ -18,6 +18,10 @@ public class PaymentRecord {
     @Column(nullable = false)
     private LocalDate paymentDate;
 
+    /** The customer account this payment reduces. Null only for payments recorded before this link existed. */
+    @Column(name = "customer_id")
+    private String customerId;
+
     @Column(nullable = false)
     private String customerName;
 
@@ -43,6 +47,9 @@ public class PaymentRecord {
 
     public LocalDate getPaymentDate() { return paymentDate; }
     public void setPaymentDate(LocalDate paymentDate) { this.paymentDate = paymentDate; }
+
+    public String getCustomerId() { return customerId; }
+    public void setCustomerId(String customerId) { this.customerId = customerId; }
 
     public String getCustomerName() { return customerName; }
     public void setCustomerName(String customerName) { this.customerName = customerName; }

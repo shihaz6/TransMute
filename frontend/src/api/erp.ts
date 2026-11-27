@@ -25,6 +25,9 @@ import type {
   SupplierDto,
 } from '@/api/dto';
 
+/** The only customer fields the PATCH endpoint accepts. Absent keys are unchanged; null clears. */
+export type CustomerPatch = Partial<Pick<CustomerDto, 'name' | 'contactPerson' | 'phone' | 'email' | 'city' | 'category'>>;
+
 /** A line as sent to the backend. Stock levels are looked up on the server. */
 export interface OrderLineInput {
   id?: string;
@@ -97,6 +100,7 @@ export const erpApi = {
   getCustomer: (id: string) => apiGet<CustomerDto>(`/api/customers/${id}`),
   createCustomer: (body: Partial<CustomerDto>) => apiSend<CustomerDto>('POST', '/api/customers', body),
   updateCustomer: (id: string, body: Partial<CustomerDto>) => apiSend<CustomerDto>('PUT', `/api/customers/${id}`, body),
+  patchCustomer: (id: string, body: CustomerPatch) => apiSend<CustomerDto>('PATCH', `/api/customers/${id}`, body),
 
   // Inventory
   inventory: () => apiGet<InventoryItemDto[]>('/api/inventory'),

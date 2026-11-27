@@ -36,6 +36,8 @@ export interface OrderLineInput {
   qty: number;
   unit?: string;
   unitPrice?: number;
+  /** Set only when the unit price was changed from the catalogue sale price. Orders and confirmation check catalogue prices unless this is true. */
+  priceOverride?: boolean;
 }
 
 /** The customer message a quote or order was taken from. */
@@ -77,6 +79,7 @@ export interface DocumentFieldsInput {
 
 export interface PaymentInput {
   paymentDate?: string;
+  customerId: string;
   customerName: string;
   method: string;
   amount: number;
@@ -115,8 +118,11 @@ export const erpApi = {
   createOrder: (body: OrderCreateInput) => apiSend<SalesOrderDto>('POST', '/api/orders', body),
   replaceQuoteItems: (id: string, lines: OrderLineInput[]) =>
     apiSend<SalesOrderDto>('PUT', `/api/orders/${id}/items`, lines),
-  convertQuote: (id: string) => apiSend<SalesOrderDto>('POST', `/api/orders/${id}/convert`),
-  confirmOrder: (id: string) => apiSend<SalesOrderDto>('POST', `/api/orders/${id}/confirm`),
+  /** Converting is the owner's decision, so a negotiated price is accepted here; the server audits each changed price. */
+  convertQuote: (id: string) => apiSend<SalesOrderDto>('POST', `/api/orders/${id}/convert?priceOverride=true`),
+  /** An order over its credit limit is held as pending-review. creditOverride=true is the owner override that invoices it. */
+  confirmOrder: (id: string, creditOverride = false) =>
+    apiSend<SalesOrderDto>('POST', `/api/orders/${id}/confirm${creditOverride ? '?creditOverride=true' : ''}`),
 
   // Suppliers and purchasing
   suppliers: () => apiGet<SupplierDto[]>('/api/suppliers'),

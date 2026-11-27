@@ -37,6 +37,7 @@ public class DocumentService {
     }
 
     private static final String NEEDS_REVIEW = "needs-review";
+    private static final String LINES_DO_NOT_ADD_UP = "Line amounts do not add up to the subtotal. Check the lines.";
 
     private final InboxDocumentRepository documents;
     private final AuditService audit;
@@ -153,8 +154,22 @@ public class DocumentService {
             BigDecimal v = parseAmount(f.total());
             if (v != null) { doc.setTotal(v); changed = true; }
         }
+        boolean linesSet = false;
+        boolean hasLines = doc.getLineItems() != null && !doc.getLineItems().isEmpty();
+        if (!hasLines && f.lineItems() != null && !f.lineItems().isEmpty()) {
+            List<InboxDocument.LineItem> items = InvoiceLines.from(f.lineItems());
+            if (!items.isEmpty()) {
+                doc.setLineItems(items);
+                linesSet = true;
+                changed = true;
+            }
+        }
         if (changed) {
             doc.setFailureReason("Fields read from the file. Check them before approving.");
+        }
+        if (linesSet && doc.getSubtotal().signum() > 0
+                && !InvoiceLines.totalsAgree(doc.getLineItems(), doc.getSubtotal())) {
+            doc.setFailureReason(LINES_DO_NOT_ADD_UP);
         }
         return changed;
     }

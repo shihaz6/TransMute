@@ -2,8 +2,10 @@ package com.transmute.erp.customer;
 
 import jakarta.validation.Valid;
 import java.util.List;
+import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -41,5 +43,10 @@ public class CustomerController {
     @PutMapping("/{id}")
     public Customer update(@PathVariable String id, @Valid @RequestBody Customer body) {
         return service.update(id, body);
+    }
+
+    @PatchMapping("/{id}")
+    public Customer patch(@PathVariable String id, @RequestBody Map<String, Object> changes) {
+        return service.patch(id, changes);
     }
 }

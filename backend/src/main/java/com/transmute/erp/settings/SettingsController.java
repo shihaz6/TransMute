@@ -1,5 +1,6 @@
 package com.transmute.erp.settings;
 
+import com.transmute.erp.common.BadRequestException;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
@@ -35,8 +36,12 @@ public class SettingsController {
     }
 
     @PatchMapping("/approval-rules/{id}")
-    public ApprovalRule setActive(@PathVariable String id, @RequestBody Map<String, Boolean> body) {
-        return service.setRuleActive(id, Boolean.TRUE.equals(body.get("active")));
+    public ApprovalRule setActive(@PathVariable String id, @RequestBody Map<String, Object> body) {
+        Object active = body == null ? null : body.get("active");
+        if (!(active instanceof Boolean flag)) {
+            throw new BadRequestException("active is required");
+        }
+        return service.setRuleActive(id, flag);
     }
 
     @GetMapping("/ai")

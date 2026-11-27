@@ -1,5 +1,6 @@
 package com.transmute.erp.ai;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -36,15 +37,22 @@ public class GroqClient {
      * Sends the messages (each a map with "role" and "content") and returns the assistant's text,
      * or empty if no key is set, the call fails, or the reply has no text.
      */
-    public Optional<String> complete(List<Map<String, String>> messages, int maxTokens, String reasoningEffort) {
+    public Optional<String> complete(List<?> messages, int maxTokens, String reasoningEffort) {
+        return complete(model, messages, maxTokens, reasoningEffort);
+    }
+
+    /** As {@link #complete(List, int, String)}, but with a specific model (for example a vision model). */
+    public Optional<String> complete(String modelName, List<?> messages, int maxTokens, String reasoningEffort) {
         if (!configured()) {
             return Optional.empty();
         }
-        Map<String, Object> body = Map.of(
-                "model", model,
-                "reasoning_effort", reasoningEffort,
-                "max_completion_tokens", maxTokens,
-                "messages", messages);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", modelName);
+        if (reasoningEffort != null) {
+            body.put("reasoning_effort", reasoningEffort);
+        }
+        body.put("max_completion_tokens", maxTokens);
+        body.put("messages", messages);
         try {
             Map<?, ?> response = client.post()
                     .uri("/chat/completions")

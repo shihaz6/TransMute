@@ -6,4 +6,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface SalesOrderRepository extends JpaRepository<SalesOrder, String> {
 
     List<SalesOrder> findAllByOrderByCreatedAtDesc();
+
+    List<SalesOrder> findByCustomerIdAndStatus(String customerId, String status);
 }

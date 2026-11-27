@@ -47,6 +47,26 @@ class AuthTest {
     }
 
     @Test
+    void repeatedWrongPasswordsAreThrottled() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            mvc.perform(post("/api/auth/login").contentType("application/json")
+                            .content("{\"username\":\"throttle-target\",\"password\":\"wrong\"}")
+                            .with(request -> {
+                                request.setRemoteAddr("10.9.9.9");
+                                return request;
+                            }))
+                    .andExpect(status().isUnauthorized());
+        }
+        mvc.perform(post("/api/auth/login").contentType("application/json")
+                        .content("{\"username\":\"throttle-target\",\"password\":\"wrong\"}")
+                        .with(request -> {
+                            request.setRemoteAddr("10.9.9.9");
+                            return request;
+                        }))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
     void correctPasswordSignsInAndTheSessionWorks() throws Exception {
         var session = mvc.perform(post("/api/auth/login").contentType("application/json")
                         .content("{\"username\":\"owner-test\",\"password\":\"correct-horse-battery\"}"))

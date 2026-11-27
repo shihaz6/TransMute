@@ -1,7 +1,11 @@
 // Thin HTTP client for the TransMute backend. All requests go to API_BASE_URL.
+// Requests carry the session cookie. Writes send the CSRF token from the XSRF-TOKEN cookie.
 
 export const API_BASE_URL: string =
   (import.meta.env?.VITE_API_URL as string | undefined) ?? 'http://localhost:8080';
+
+/** Fired on window when the server says the session is missing or has expired. */
+export const SESSION_ENDED_EVENT = 'transmute:session-ended';
 
 /** An error returned by the backend, or a network failure (status 0). */
 export class ApiError extends Error {
@@ -16,9 +20,18 @@ export class ApiError extends Error {
   }
 }
 
+function csrfToken(): string | undefined {
+  try {
+    const match = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function send(url: string, init: RequestInit): Promise<Response> {
   try {
-    return await fetch(url, init);
+    return await fetch(url, { ...init, credentials: 'include' });
   } catch {
     throw new ApiError(`Cannot reach the TransMute server at ${API_BASE_URL}. Is the backend running?`, 0);
   }
@@ -39,6 +52,9 @@ async function parse<T>(res: Response): Promise<T> {
   } catch {
     // Keep the generic message when the body is not JSON.
   }
+  if (res.status === 401) {
+    window.dispatchEvent(new Event(SESSION_ENDED_EVENT));
+  }
   throw new ApiError(message, res.status, fields);
 }
 
@@ -47,10 +63,15 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiSend<T>(method: 'POST' | 'PUT' | 'PATCH', path: string, body?: unknown): Promise<T> {
+  const token = csrfToken();
   return parse<T>(
     await send(API_BASE_URL + path, {
       method,
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...(token ? { 'X-XSRF-TOKEN': token } : {}),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   );
@@ -60,7 +81,14 @@ export async function apiUpload<T>(path: string, file: File, channel: string): P
   const form = new FormData();
   form.append('file', file);
   form.append('channel', channel);
-  return parse<T>(await send(API_BASE_URL + path, { method: 'POST', body: form }));
+  const token = csrfToken();
+  return parse<T>(
+    await send(API_BASE_URL + path, {
+      method: 'POST',
+      headers: token ? { 'X-XSRF-TOKEN': token } : undefined,
+      body: form,
+    })
+  );
 }
 
 /** Absolute URL for a file served by the API, such as a stored invoice. */

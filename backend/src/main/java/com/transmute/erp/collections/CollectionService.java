@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
+import org.springframework.mail.MailException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,14 +23,19 @@ public class CollectionService {
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.ENGLISH);
     private static final List<String> TONES = List.of("friendly", "firm", "final");
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CollectionService.class);
+
     private final CollectionItemRepository items;
     private final CustomerService customers;
     private final AuditService audit;
+    private final ReminderMailer mailer;
 
-    public CollectionService(CollectionItemRepository items, CustomerService customers, AuditService audit) {
+    public CollectionService(CollectionItemRepository items, CustomerService customers, AuditService audit,
+                             ReminderMailer mailer) {
         this.items = items;
         this.customers = customers;
         this.audit = audit;
+        this.mailer = mailer;
     }
 
     @Transactional(readOnly = true)
@@ -90,19 +96,32 @@ public class CollectionService {
     }
 
     /**
-     * Marks a reminder as sent after the owner approves it. The app does not deliver the
-     * message itself; delivery is a separate integration.
+     * Emails the approved reminder to the customer, then records it as sent. Fails without
+     * changing anything if the customer has no email or the server's mail is not set up.
      */
     public CollectionItem markSent(String id) {
         CollectionItem item = get(id);
         if ("sent".equals(item.getStatus()) || "promised".equals(item.getStatus())) {
             throw new BadRequestException("This reminder has already been sent");
         }
+        String to = customers.get(item.getCustomerId()).getEmail();
+        if (to == null || to.isBlank()) {
+            throw new BadRequestException("Add the customer's email address before sending this reminder");
+        }
+        if (!mailer.configured()) {
+            throw new BadRequestException("Email is not set up on the server. Set MAIL_HOST and MAIL_FROM first.");
+        }
+        try {
+            mailer.send(to.trim(), "Payment reminder from TransMute", item.getDraftMessage());
+        } catch (MailException e) {
+            log.warn("Reminder email for {} failed: {}", item.getId(), e.getMessage());
+            throw new BadRequestException("The email could not be sent. Check the server's mail settings.");
+        }
         item.setStatus("sent");
         item.setLastContacted(Instant.now());
         audit.record("Collections",
-                "Approved reminder sent to " + item.getCustomerName() + " (" + item.getOverdueAmount() + ")",
-                "Owner reviewed and approved the " + item.getTone() + " message.",
+                "Emailed reminder to " + item.getCustomerName() + " (" + item.getOverdueAmount() + ")",
+                "Owner approved the " + item.getTone() + " message; sent to the customer's email.",
                 96, "Owner", "approved");
         return item;
     }

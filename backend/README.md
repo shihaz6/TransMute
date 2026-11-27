@@ -53,6 +53,7 @@ The API listens on `http://localhost:8080`. Health check: `GET /actuator/health`
 | Settings | `GET/POST /api/settings/approval-rules`, `PATCH /api/settings/approval-rules/{id}`, `GET /api/settings/ai`, `PATCH /api/settings/ai/{id}` |
 | Catalyst chat | `GET/POST /api/catalyst/messages` |
 | Audit log | `GET /api/audit-log?module=` |
+| Sign-in | `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout` |
 
 Errors return JSON: `{"status": 400, "message": "...", "fields": {...}}`.
 
@@ -69,12 +70,30 @@ Errors return JSON: `{"status": 400, "message": "...", "fields": {...}}`.
   amount to the ledger, and the running balance is maintained by the service.
 - Every change that matters is written to the audit log.
 
+## Sign-in, AI and email
+
+- **Sign-in.** Every `/api/**` call needs a session. `POST /api/auth/login` with
+  `{"username","password"}` starts one, `GET /api/auth/me` returns the signed-in account,
+  and `POST /api/auth/logout` ends it. Writes need the CSRF token from the `XSRF-TOKEN`
+  cookie, sent back in the `X-XSRF-TOKEN` header. The frontend does this already.
+- **Owner account.** Created on first start from `OWNER_USERNAME` and `OWNER_PASSWORD`.
+  Changing those variables later does not change an existing account. Without both,
+  nobody can sign in.
+- **AI.** `GROQ_API_KEY` turns on the daily haiku, Catalyst replies and invoice reading
+  (a Groq vision model reads header fields from uploaded image invoices, filling only blank
+  fields; PDFs are not read yet). Without the key, the fixed haiku is shown and Catalyst
+  says AI replies are off.
+- **Reminder email.** Set `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD` and
+  `MAIL_FROM`. Sending an approved reminder emails it to the customer's `email` and then
+  marks it sent. Without a customer email or SMTP settings, it is refused and nothing is marked sent.
+  Customer email can be set through `PUT /api/customers/{id}`; the frontend has no customer
+  edit form yet.
+- **Schema.** Flyway migrations in `src/main/resources/db/migration` (V1 is the baseline).
+  Hibernate only validates the schema (`ddl-auto=validate`).
+
 ## Not implemented yet
 
-- Authentication and per-user permissions. All actions are recorded as the owner.
-- Automatic extraction from uploaded invoices (OCR). Documents are stored and reviewed by hand.
-- Delivering WhatsApp or email reminders. Marking a reminder as sent only records it.
-- AI replies in Catalyst. Messages are stored only.
-- Database migrations (Flyway). The schema is created by Hibernate with `ddl-auto=update`.
-- Dates and times are ISO-8601 (for example `2026-04-14T09:00:00Z`). The frontend currently
-  shows display strings such as `14 Apr 2026`, so it will need a small adapter when connected.
+- Per-user permissions. There is one owner role, and all actions are recorded as the owner.
+- WhatsApp delivery. Reminders go by email only.
+- Reading PDF invoices. Only images are read automatically.
+- A customer edit form in the frontend (email and phone cannot be entered from the UI yet).

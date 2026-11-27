@@ -32,6 +32,39 @@ import { formatRs } from '@/utils/format';
 import { apiDateFromText } from '@/utils/dates';
 import type { DocumentFieldsInput } from '@/api/erp';
 
+const DOC_STATUS_FILTERS = ['all', 'needs-review', 'auto-posted', 'approved', 'rejected', 'failed'] as const;
+type DocStatusFilter = (typeof DOC_STATUS_FILTERS)[number];
+
+const isDocStatusFilter = (value: string): value is DocStatusFilter =>
+  (DOC_STATUS_FILTERS as readonly string[]).includes(value);
+
+// Strict amount parsing for inline edits. Returns null when the text is not a clear number,
+// so the caller refuses to save instead of writing a wrong value. Thousands separators are
+// removed only in the unambiguous "1,234.50" and "1.234,50" forms.
+const parseAmount = (text: string): number | null => {
+  const t = text.trim();
+  const lastComma = t.lastIndexOf(',');
+  const lastDot = t.lastIndexOf('.');
+  let normalized = t;
+  if (lastComma !== -1 && lastDot !== -1) {
+    if (lastComma > lastDot) {
+      // "1.234,50": dots are thousands separators, the comma is the decimal point
+      if (!/^-?\d{1,3}(\.\d{3})+,\d+$/.test(t)) return null;
+      normalized = t.replace(/\./g, '').replace(',', '.');
+    } else {
+      // "1,234.50": commas are thousands separators, the dot is the decimal point
+      if (!/^-?\d{1,3}(,\d{3})+\.\d+$/.test(t)) return null;
+      normalized = t.replace(/,/g, '');
+    }
+  } else if (lastComma !== -1) {
+    // A lone comma is ambiguous ("1,234" could mean 1.234), so it is refused.
+    return null;
+  }
+  if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(normalized)) return null;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : null;
+};
+
 export function DocumentsScreen() {
   const {
     documents,
@@ -46,7 +79,7 @@ export function DocumentsScreen() {
   } = useErp();
 
   const [channelFilter, setChannelFilter] = useState<'all' | DocChannel>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | DocStatus>('all');
+  const [statusFilter, setStatusFilter] = useState<DocStatusFilter>('all');
   const [search, setSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -77,19 +110,45 @@ export function DocumentsScreen() {
 
   // Uploaded files are stored by the backend. No values are extracted from them, so each
   // document waits in review for its fields to be entered by hand.
+  // In-flight guard: a repeat click on the same action is ignored until the first one finishes.
+  // The ref is checked and set synchronously before the await; the state mirrors it so the
+  // matching button can be disabled while the request is pending.
+  const inFlight = useRef<Set<string>>(new Set());
+  const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
+
+  const runGuarded = async (key: string, task: () => Promise<unknown>): Promise<boolean> => {
+    if (inFlight.current.has(key)) return false;
+    inFlight.current.add(key);
+    setPendingActions((prev) => new Set(prev).add(key));
+    try {
+      await task();
+      return true;
+    } finally {
+      inFlight.current.delete(key);
+      setPendingActions((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
   const addUploadedFiles = async (files: FileList | null, channel: DocChannel = 'upload') => {
     if (!files || files.length === 0) return;
-    const newId = await uploadDocuments(Array.from(files), channel);
-    if (newId && files.length === 1) setSelectedDocId(newId);
+    const list = Array.from(files);
+    const ran = await runGuarded('upload', async () => {
+      const newId = await uploadDocuments(list, channel);
+      if (newId && list.length === 1) setSelectedDocId(newId);
+    });
+    if (!ran) {
+      addToast({ title: 'Upload in progress', description: 'Wait for the current upload to finish.', variant: 'warning' });
+    }
   };
 
   const handleDocAction = async (doc: InboxDocument, action: 'approved' | 'rejected') => {
     setEditMode(false);
-    if (action === 'approved') {
-      await approveDocument(doc.id);
-    } else {
-      await rejectDocument(doc.id);
-    }
+    const key = `${action === 'approved' ? 'approve' : 'reject'}:${doc.id}`;
+    await runGuarded(key, () => (action === 'approved' ? approveDocument(doc.id) : rejectDocument(doc.id)));
   };
 
   // Field edits are held here while typing and saved to the backend when the field loses focus.
@@ -112,11 +171,28 @@ export function DocumentsScreen() {
     value: string
   ) => {
     setFieldDraft(null);
+    const doc = documents.find((d) => d.id === docId);
     const payload: DocumentFieldsInput = {};
     if (field === 'total') {
-      payload.total = Number(value.replace(/[^0-9.]/g, '')) || 0;
+      const amount = parseAmount(value);
+      if (amount === null) {
+        addToast({
+          title: 'Enter a valid amount',
+          description: 'Use digits with an optional minus sign and decimal point, such as 12500.00. The saved amount was not changed.',
+          variant: 'warning',
+        });
+        return;
+      }
+      if (amount === doc?.total.value) return;
+      payload.total = amount;
     } else if (field === 'invoiceNumber') {
-      payload.invoiceNumber = value.trim();
+      const text = value.trim();
+      if (!text) {
+        addToast({ title: 'Invoice number is required', description: 'The saved invoice number was not changed.', variant: 'warning' });
+        return;
+      }
+      if (text === doc?.invoiceNumber.value) return;
+      payload.invoiceNumber = text;
     } else {
       const iso = apiDateFromText(value);
       if (!iso) {
@@ -125,9 +201,10 @@ export function DocumentsScreen() {
         }
         return;
       }
+      if (value.trim() === doc?.[field].value) return;
       payload[field] = iso;
     }
-    void updateDocumentFields(docId, payload);
+    void runGuarded(`field:${docId}:${field}`, () => updateDocumentFields(docId, payload));
   };
 
   const statusChip = (status: DocStatus) => {
@@ -216,6 +293,7 @@ export function DocumentsScreen() {
               size="sm"
               icon={<XCircle className="w-3.5 h-3.5" />}
               onClick={() => handleDocAction(activeDoc, 'rejected')}
+              disabled={pendingActions.has(`reject:${activeDoc.id}`)}
             >
               Reject
             </Button>
@@ -224,6 +302,7 @@ export function DocumentsScreen() {
               size="sm"
               icon={<CheckCircle2 className="w-3.5 h-3.5" />}
               onClick={() => handleDocAction(activeDoc, 'approved')}
+              disabled={pendingActions.has(`approve:${activeDoc.id}`)}
             >
               Approve & Post
             </Button>
@@ -653,6 +732,7 @@ export function DocumentsScreen() {
             size="sm"
             icon={<Upload className="w-4 h-4" />}
             onClick={() => fileInputRef.current?.click()}
+            disabled={pendingActions.has('upload')}
           >
             Upload Invoice
           </Button>
@@ -763,13 +843,17 @@ export function DocumentsScreen() {
           <div className="flex items-center gap-2 flex-wrap">
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as 'all' | DocStatus)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setStatusFilter(isDocStatusFilter(next) ? next : 'all');
+              }}
               className="px-3 py-2 text-xs rounded-xl bg-white dark:bg-zinc-900 border border-stone-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-200 focus:outline-none focus:border-[#EA581A]"
             >
               <option value="all">All Statuses</option>
               <option value="needs-review">Needs review</option>
               <option value="auto-posted">Auto-posted</option>
               <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
               <option value="failed">Failed</option>
             </select>
             <SearchInput

@@ -5,6 +5,7 @@ import { apiFileUrl, apiGet, apiSend, apiUpload } from '@/api/client';
 import type {
   AiSettingDto,
   AnomalyAlertDto,
+  AuthUserDto,
   ApprovalRuleDto,
   AuditEntryDto,
   BankLineDto,
@@ -169,6 +170,12 @@ export const erpApi = {
   addAiSetting: (body: { task: string; description?: string; mode: string; threshold?: string }) =>
     apiSend<AiSettingDto>('POST', '/api/settings/ai', body),
   setAiMode: (id: string, mode: string) => apiSend<AiSettingDto>('PATCH', `/api/settings/ai/${id}`, { mode }),
+
+  // Sign-in
+  me: () => apiGet<AuthUserDto>('/api/auth/me'),
+  login: (username: string, password: string) =>
+    apiSend<AuthUserDto>('POST', '/api/auth/login', { username, password }),
+  logout: () => apiSend<void>('POST', '/api/auth/logout'),
 
   // Catalyst chat
   catalystMessages: () => apiGet<CatalystMessageDto[]>('/api/catalyst/messages'),

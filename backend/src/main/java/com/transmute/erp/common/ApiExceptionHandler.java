@@ -1,9 +1,11 @@
 package com.transmute.erp.common;
 
+import jakarta.persistence.OptimisticLockException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -28,6 +30,12 @@ public class ApiExceptionHandler {
         ex.getBindingResult().getFieldErrors()
                 .forEach(e -> fields.put(e.getField(), e.getDefaultMessage()));
         return error(HttpStatus.BAD_REQUEST, "Validation failed", fields);
+    }
+
+    @ExceptionHandler({ObjectOptimisticLockingFailureException.class, OptimisticLockException.class})
+    ResponseEntity<Map<String, Object>> optimisticLock(RuntimeException ex) {
+        return error(HttpStatus.CONFLICT,
+                "This record was changed by someone else. Reload it and try again.", null);
     }
 
     private ResponseEntity<Map<String, Object>> error(HttpStatus status, String message, Object fields) {

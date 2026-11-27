@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { SignOutButton } from '@/components/auth/SignInGate';
 import {
   AlertTriangle,
   BarChart3,
@@ -283,6 +284,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Transparent AI Audit Footer */}
       <div className="p-3.5 border-t border-stone-100 dark:border-zinc-800/80 space-y-3 shrink-0">
+        <div className="flex justify-end">
+          <SignOutButton />
+        </div>
         <button
           onClick={() => {
             setAiLogOpen(true);

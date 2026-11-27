@@ -923,6 +923,10 @@ export function DocumentsScreen() {
                         <span className="text-amber-700 dark:text-amber-400 font-medium">
                           ⚠ Variance vs {doc.threeWayMatch.poNumber}
                         </span>
+                      ) : doc.threeWayMatch.status === 'no-po' ? (
+                        <span className="text-slate-500 dark:text-zinc-400 font-medium">
+                          No purchase order
+                        </span>
                       ) : (
                         <span className="text-red-600 dark:text-red-400 font-medium">
                           Missing GRN

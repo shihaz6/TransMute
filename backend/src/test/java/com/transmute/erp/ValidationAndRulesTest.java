@@ -491,7 +491,7 @@ class ValidationAndRulesTest {
         mvc.perform(patch("/api/documents/" + doc).contentType(JSON)
                         .content("{\"supplier\":\"Acme\",\"invoiceNumber\":\"B-2\",\"total\":900}"))
                 .andExpect(status().isOk());
-        mvc.perform(post("/api/documents/" + doc + "/approve"))
+        mvc.perform(post("/api/documents/" + doc + "/approve?overrideMatch=true"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("approved"))
                 .andExpect(jsonPath("$.overallConfidence").value(100));

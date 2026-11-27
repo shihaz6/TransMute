@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -42,13 +43,20 @@ public class SalesOrderController {
         return service.replaceQuoteItems(id, body);
     }
 
+    /**
+     * Converting a quote to an order checks each line against the catalogue price. priceOverride=true
+     * accepts lines priced differently from the catalogue; the override is audited.
+     */
     @PostMapping("/{id}/convert")
-    public SalesOrder convert(@PathVariable String id) {
-        return service.convertQuote(id);
+    public SalesOrder convert(@PathVariable String id,
+                              @RequestParam(defaultValue = "false") boolean priceOverride) {
+        return service.convertQuote(id, priceOverride);
     }
 
+    /** creditOverride=true confirms an order held for the credit limit. The override is audited. */
     @PostMapping("/{id}/confirm")
-    public SalesOrder confirm(@PathVariable String id) {
-        return service.confirm(id);
+    public SalesOrder confirm(@PathVariable String id,
+                              @RequestParam(defaultValue = "false") boolean creditOverride) {
+        return service.confirm(id, creditOverride);
     }
 }

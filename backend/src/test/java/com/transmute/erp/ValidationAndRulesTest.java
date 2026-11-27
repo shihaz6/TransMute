@@ -19,7 +19,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -31,10 +33,17 @@ import org.springframework.test.web.servlet.MvcResult;
         "spring.datasource.url=jdbc:h2:mem:validation-test;DB_CLOSE_DELAY=-1",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "transmute.storage.dir=target/validation-uploads",
-        "transmute.haiku.groq-api-key="
+        "transmute.haiku.groq-api-key=",
+        "spring.mail.host=localhost",
+        "transmute.mail.from=erp@example.test",
+        "management.health.mail.enabled=false"
 })
 @AutoConfigureMockMvc
 class ValidationAndRulesTest {
+
+    /** Reminder emails are captured here instead of being sent. */
+    @MockitoBean
+    private JavaMailSender mailSender;
 
     private static final MediaType JSON = MediaType.APPLICATION_JSON;
     private static final String SHARED_SKU = "SHARED-SKU";
@@ -833,7 +842,7 @@ class ValidationAndRulesTest {
     private String createOverdueCustomer(String name, int daysOverdue, int balance) throws Exception {
         return idOf(mvc.perform(post("/api/customers").contentType(JSON)
                         .content("{\"name\":\"" + name + "\",\"contactPerson\":\"Owner\",\"phone\":\"0770000000\","
-                                + "\"creditLimit\":0,\"outstandingBalance\":" + balance
+                                + "\"email\":\"accounts@shop.example\",\"creditLimit\":0,\"outstandingBalance\":" + balance
                                 + ",\"daysOverdue\":" + daysOverdue + "}"))
                 .andExpect(status().isCreated())
                 .andReturn());

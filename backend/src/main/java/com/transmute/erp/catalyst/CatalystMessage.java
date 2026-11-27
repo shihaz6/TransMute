@@ -7,8 +7,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 /**
- * A message in the Catalyst chat. The backend stores the conversation; it does not
- * generate AI replies yet.
+ * A message in the Catalyst chat. User messages get an AI reply from {@link CatalystService}.
  */
 @Entity
 @Table(name = "catalyst_messages")

@@ -3,6 +3,7 @@ package com.transmute.erp.purchasing;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.Version;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -30,6 +31,9 @@ public class PurchaseOrder {
     @Id
     private String id;
 
+    @Version
+    private Long version;
+
     @Column(nullable = false)
     private String supplierId;
 
@@ -53,6 +57,9 @@ public class PurchaseOrder {
 
     @JdbcTypeCode(SqlTypes.JSON)
     private List<PoLine> lines = new ArrayList<>();
+
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }

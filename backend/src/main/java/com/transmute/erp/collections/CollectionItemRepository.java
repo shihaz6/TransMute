@@ -8,4 +8,6 @@ public interface CollectionItemRepository extends JpaRepository<CollectionItem, 
     List<CollectionItem> findAllByOrderByDaysOverdueDesc();
 
     boolean existsByCustomerIdAndStatusNot(String customerId, String status);
+
+    boolean existsByCustomerIdAndStatusIn(String customerId, List<String> statuses);
 }

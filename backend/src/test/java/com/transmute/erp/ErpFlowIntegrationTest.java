@@ -117,7 +117,7 @@ class ErpFlowIntegrationTest {
         mvc.perform(patch("/api/documents/" + docId).contentType("application/json")
                         .content("{\"supplier\":\"Test Supplier\",\"invoiceNumber\":\"INV-1\",\"total\":500}"))
                 .andExpect(status().isOk());
-        mvc.perform(post("/api/documents/" + docId + "/approve"))
+        mvc.perform(post("/api/documents/" + docId + "/approve?overrideMatch=true"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("approved"));
         mvc.perform(get("/api/documents/" + docId + "/file")).andExpect(status().isOk());

@@ -56,8 +56,9 @@ public class DocumentController {
     }
 
     @PostMapping("/{id}/approve")
-    public InboxDocument approve(@PathVariable String id) {
-        return service.approve(id);
+    public InboxDocument approve(@PathVariable String id,
+                                 @RequestParam(defaultValue = "false") boolean overrideMatch) {
+        return service.approve(id, overrideMatch);
     }
 
     @PostMapping("/{id}/reject")

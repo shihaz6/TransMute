@@ -36,6 +36,7 @@ public class InventoryService {
             throw new BadRequestException("SKU already exists: " + input.getSku());
         }
         input.setId(Ids.next("INV"));
+        input.setVersion(null);
         return items.save(input);
     }
 
@@ -58,7 +59,8 @@ public class InventoryService {
      * Each adjustment is recorded in the audit log.
      */
     public InventoryItem adjustStock(String id, String location, int delta, String reason) {
-        InventoryItem item = get(id);
+        InventoryItem item = items.findByIdForUpdate(id)
+                .orElseThrow(() -> new NotFoundException("Inventory item", id));
         int current = switch (location) {
             case "warehouse" -> item.getWarehouseStock();
             case "shop" -> item.getShopStock();
@@ -79,5 +81,22 @@ public class InventoryService {
                 reason == null || reason.isBlank() ? "Manual stock adjustment" : reason,
                 null, "Owner", "approved");
         return item;
+    }
+
+    /**
+     * Takes qty out of the warehouse stock of the item with this SKU. The row is locked for
+     * the rest of the transaction so concurrent sales cannot both take the same units.
+     */
+    public void deductWarehouse(String sku, int qty) {
+        if (qty <= 0) {
+            throw new BadRequestException("Quantity to deduct must be greater than zero");
+        }
+        InventoryItem item = items.findBySkuForUpdate(sku)
+                .orElseThrow(() -> new NotFoundException("Inventory item", sku));
+        int next = item.getWarehouseStock() - qty;
+        if (next < 0) {
+            throw new BadRequestException("Not enough stock of " + sku + " in the warehouse");
+        }
+        item.setWarehouseStock(next);
     }
 }

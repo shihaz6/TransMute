@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -83,6 +84,10 @@ public class SalesOrder {
 
     private Integer aiConfidence;
 
+    /** Optimistic locking, so two concurrent confirmations cannot both succeed. */
+    @Version
+    private Long version;
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
@@ -118,4 +123,7 @@ public class SalesOrder {
 
     public Integer getAiConfidence() { return aiConfidence; }
     public void setAiConfidence(Integer aiConfidence) { this.aiConfidence = aiConfidence; }
+
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
 }

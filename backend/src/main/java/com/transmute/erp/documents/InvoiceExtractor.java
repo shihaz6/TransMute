@@ -4,6 +4,7 @@ import com.transmute.erp.ai.GroqClient;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
@@ -15,9 +16,9 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Reads the header fields of a supplier invoice photo or scan with a Groq vision model.
- * Only images are supported. PDFs are not rendered yet. Any failure returns empty, so an
- * upload never fails because of extraction.
+ * Reads the header fields of a supplier invoice photo, scan or PDF with Groq models.
+ * A PDF with a text layer is read as text; a scanned PDF has its first pages rendered and read
+ * as images. Any failure returns empty, so an upload never fails because of extraction.
  */
 @Component
 public class InvoiceExtractor {
@@ -36,6 +37,12 @@ public class InvoiceExtractor {
     }
 
     static final Set<String> IMAGE_TYPES = Set.of("image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif");
+    static final String PDF_TYPE = "application/pdf";
+
+    /** Fewer non-whitespace characters than this means the PDF has no usable text layer. */
+    static final int MIN_TEXT_CHARS = 80;
+    /** Pages rendered for a scanned PDF. */
+    static final int MAX_PDF_PAGES = 3;
 
     private static final String PROMPT =
             "This is a supplier invoice from a food distribution business. Read the header fields and reply with "
@@ -46,17 +53,26 @@ public class InvoiceExtractor {
     private final GroqClient groq;
     private final ObjectMapper json;
     private final String model;
+    private final String textModel;
 
     public InvoiceExtractor(GroqClient groq, ObjectMapper json,
-                            @Value("${transmute.ocr.model:meta-llama/llama-4-scout-17b-16e-instruct}") String model) {
+                            @Value("${transmute.ocr.model:meta-llama/llama-4-scout-17b-16e-instruct}") String model,
+                            @Value("${transmute.ocr.text-model:openai/gpt-oss-20b}") String textModel) {
         this.groq = groq;
         this.json = json;
         this.model = model;
+        this.textModel = textModel;
     }
 
     public Optional<Extracted> extract(Path file, String contentType) {
-        if (!groq.configured() || contentType == null
-                || !IMAGE_TYPES.contains(contentType.toLowerCase(Locale.ROOT))) {
+        if (!groq.configured() || contentType == null) {
+            return Optional.empty();
+        }
+        String type = contentType.toLowerCase(Locale.ROOT);
+        if (PDF_TYPE.equals(type)) {
+            return extractPdf(file);
+        }
+        if (!IMAGE_TYPES.contains(type)) {
             return Optional.empty();
         }
         try {
@@ -73,6 +89,42 @@ public class InvoiceExtractor {
         } catch (IOException | RuntimeException e) {
             return Optional.empty();
         }
+    }
+
+    /** Text layer first (one text request); if there is no text, the first pages as images (one vision request). */
+    private Optional<Extracted> extractPdf(Path file) {
+        try {
+            byte[] pdf = Files.readAllBytes(file);
+            String text = PdfPages.extractText(pdf);
+            if (nonWhitespaceCount(text) >= MIN_TEXT_CHARS) {
+                List<Map<String, Object>> messages = List.of(Map.of(
+                        "role", "user",
+                        "content", PROMPT + "\n\nInvoice text:\n" + text));
+                return groq.complete(textModel, messages, 800, null)
+                        .map(InvoiceExtractor::jsonPart)
+                        .flatMap(this::parse);
+            }
+            List<byte[]> pages = PdfPages.renderPages(pdf, MAX_PDF_PAGES);
+            if (pages.isEmpty()) {
+                return Optional.empty();
+            }
+            List<Object> content = new ArrayList<>();
+            content.add(Map.of("type", "text", "text", PROMPT));
+            for (byte[] png : pages) {
+                String dataUrl = "data:image/png;base64," + Base64.getEncoder().encodeToString(png);
+                content.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl)));
+            }
+            List<Map<String, Object>> messages = List.of(Map.of("role", "user", "content", content));
+            return groq.complete(model, messages, 800, null)
+                    .map(InvoiceExtractor::jsonPart)
+                    .flatMap(this::parse);
+        } catch (IOException | RuntimeException e) {
+            return Optional.empty();
+        }
+    }
+
+    private static long nonWhitespaceCount(String text) {
+        return text.chars().filter(c -> !Character.isWhitespace(c)).count();
     }
 
     /** The JSON object inside the reply, without any code fence around it. */

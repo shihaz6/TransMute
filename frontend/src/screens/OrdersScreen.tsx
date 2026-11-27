@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -52,17 +52,48 @@ export function OrdersScreen() {
   const [lineSku, setLineSku] = useState('');
   const [lineQty, setLineQty] = useState('1');
   const [linePrice, setLinePrice] = useState('');
+  // Keys of actions in progress. The ref is checked synchronously, so a fast double click cannot
+  // start the same action twice; the state only drives the disabled buttons.
+  const inFlight = useRef<Set<string>>(new Set());
+  const [pending, setPending] = useState<Set<string>>(() => new Set());
+  const isPending = (key: string) => pending.has(key);
+
+  const runOnce = async (key: string, action: () => Promise<void>) => {
+    if (inFlight.current.has(key)) return;
+    inFlight.current.add(key);
+    setPending((prev) => new Set(prev).add(key));
+    try {
+      await action();
+    } finally {
+      inFlight.current.delete(key);
+      setPending((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
 
   const activeOrder = useMemo(
     () => orders.find((o) => o.id === selectedOrderId) || null,
     [orders, selectedOrderId]
   );
+  const activeOrderId = activeOrder?.id;
 
-  // When a quote is opened, its saved lines become the editable list.
+  // The reset effect below runs only when the opened order changes, but it needs the latest order.
+  // This ref is refreshed by an effect declared first, so the reset effect always reads the current order.
+  const latestActiveOrder = useRef(activeOrder);
   useEffect(() => {
-    if (activeOrder && activeOrder.type === 'quote') {
+    latestActiveOrder.current = activeOrder;
+  });
+
+  // When a quote is opened, its saved lines become the editable list. Keyed on the order id only,
+  // so a reload of the orders list does not wipe unsaved edits.
+  useEffect(() => {
+    const order = latestActiveOrder.current;
+    if (order && order.type === 'quote') {
       setQuoteLines(
-        activeOrder.items.map((l) => ({
+        order.items.map((l) => ({
           id: l.id,
           sku: l.sku,
           productName: l.productName,
@@ -72,8 +103,7 @@ export function OrdersScreen() {
         }))
       );
     }
-    // Only reset when a different quote is opened or its saved lines change.
-  }, [activeOrder?.id, activeOrder?.items]);
+  }, [activeOrderId]);
 
   const filtered = useMemo(() => {
     return orders.filter((o) => {
@@ -91,33 +121,36 @@ export function OrdersScreen() {
     });
   }, [orders, tab, search]);
 
-  const handleConfirmAndInvoice = (order: SalesOrder) => {
-    void confirmOrder(order.id);
-  };
+  // Confirming an order held at pending-review is the owner's credit override.
+  const handleConfirmAndInvoice = (order: SalesOrder) =>
+    runOnce(`confirm:${order.id}`, async () => {
+      await confirmOrder(order.id, order.status === 'pending-review');
+    });
 
   // Creates a quote from the pasted message. Its lines are added afterwards in the quote editor.
-  const handleCreateQuoteFromThread = async () => {
-    const customer = customers.find((c) => c.id === quoteCustomerId);
-    if (!customer || !quoteThreadText.trim()) return;
-    const created = await createOrder({
-      type: 'quote',
-      customerId: customer.id,
-      source: quoteThreadText.toLowerCase().includes('whatsapp') ? 'whatsapp' : 'email',
-      originalMessage: {
-        sender: customer.contactPerson || customer.name,
-        phoneOrEmail: customer.phone,
-        timestamp: new Date().toISOString(),
-        text: quoteThreadText,
-        voiceTranscript: false,
-        voiceDuration: null,
-      },
+  const handleCreateQuoteFromThread = () =>
+    runOnce('create-quote', async () => {
+      const customer = customers.find((c) => c.id === quoteCustomerId);
+      if (!customer || !quoteThreadText.trim()) return;
+      const created = await createOrder({
+        type: 'quote',
+        customerId: customer.id,
+        source: quoteThreadText.toLowerCase().includes('whatsapp') ? 'whatsapp' : 'email',
+        originalMessage: {
+          sender: customer.contactPerson || customer.name,
+          phoneOrEmail: customer.phone,
+          timestamp: new Date().toISOString(),
+          text: quoteThreadText,
+          voiceTranscript: false,
+          voiceDuration: null,
+        },
+      });
+      if (!created) return;
+      setQuoteModalOpen(false);
+      setQuoteThreadText('');
+      setQuoteCustomerId('');
+      setSelectedOrderId(created.id);
     });
-    if (!created) return;
-    setQuoteModalOpen(false);
-    setQuoteThreadText('');
-    setQuoteCustomerId('');
-    setSelectedOrderId(created.id);
-  };
 
   const addQuoteLine = () => {
     const product = inventory.find((i) => i.sku === lineSku);
@@ -127,25 +160,36 @@ export function OrdersScreen() {
       return;
     }
     const price = linePrice.trim() === '' ? undefined : Number(linePrice);
+    // Only a price typed away from the catalogue sale price is an override. Lines loaded from a saved quote never get the flag.
+    const isOverride = price !== undefined && price !== product.salePrice;
     setQuoteLines((prev) => [
       ...prev,
-      { sku: product.sku, productName: product.name, qty, unit: product.unit, unitPrice: price },
+      {
+        sku: product.sku,
+        productName: product.name,
+        qty,
+        unit: product.unit,
+        unitPrice: price,
+        ...(isOverride ? { priceOverride: true } : {}),
+      },
     ]);
     setLineSku('');
     setLineQty('1');
     setLinePrice('');
   };
 
-  const saveQuoteLines = async () => {
-    if (activeOrder) await replaceQuoteItems(activeOrder.id, quoteLines);
-  };
+  // Save and convert share one key per quote, so neither can run while the other is still in progress.
+  const saveQuoteLines = (orderId: string) =>
+    runOnce(`quote:${orderId}`, async () => {
+      await replaceQuoteItems(orderId, quoteLines);
+    });
 
   // Saves the lines first, so the conversion uses what is on screen. Stops if the save fails.
-  const saveAndConvertQuote = async () => {
-    if (!activeOrder) return;
-    const saved = await replaceQuoteItems(activeOrder.id, quoteLines);
-    if (saved) await convertQuote(activeOrder.id);
-  };
+  const saveAndConvertQuote = (orderId: string) =>
+    runOnce(`quote:${orderId}`, async () => {
+      const saved = await replaceQuoteItems(orderId, quoteLines);
+      if (saved) await convertQuote(orderId);
+    });
 
   const statusChip = (status: OrderStatus) => {
     switch (status) {
@@ -226,7 +270,8 @@ export function OrdersScreen() {
                 variant="gold"
                 size="sm"
                 icon={<CheckCircle2 className="w-4 h-4" />}
-                onClick={() => handleConfirmAndInvoice(activeOrder)}
+                disabled={isPending(`confirm:${activeOrder.id}`)}
+                onClick={() => void handleConfirmAndInvoice(activeOrder)}
               >
                 Confirm & Invoice
               </Button>
@@ -382,14 +427,19 @@ export function OrdersScreen() {
                   </ul>
                 )}
                 <div className="flex items-center justify-end gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => void saveQuoteLines()}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={isPending(`quote:${activeOrder.id}`)}
+                    onClick={() => void saveQuoteLines(activeOrder.id)}
+                  >
                     Save lines
                   </Button>
                   <Button
                     variant="gold"
                     size="sm"
-                    disabled={quoteLines.length === 0}
-                    onClick={() => void saveAndConvertQuote()}
+                    disabled={quoteLines.length === 0 || isPending(`quote:${activeOrder.id}`)}
+                    onClick={() => void saveAndConvertQuote(activeOrder.id)}
                   >
                     Convert to order
                   </Button>
@@ -623,8 +673,8 @@ export function OrdersScreen() {
               variant="gold"
               size="sm"
               icon={<Plus className="w-4 h-4" />}
-              onClick={handleCreateQuoteFromThread}
-              disabled={!quoteCustomerId || !quoteThreadText.trim()}
+              onClick={() => void handleCreateQuoteFromThread()}
+              disabled={!quoteCustomerId || !quoteThreadText.trim() || isPending('create-quote')}
             >
               Create Quote
             </Button>

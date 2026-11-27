@@ -96,17 +96,19 @@ class ErpFlowIntegrationTest {
         mvc.perform(post("/api/purchase-orders/" + poId + "/receive").contentType("application/json")
                         .content("{\"lines\":[{\"sku\":\"T-OIL-1\",\"qty\":9}]}"))
                 .andExpect(status().isBadRequest());
-        mvc.perform(get("/api/inventory/" + itemId)).andExpect(jsonPath("$.warehouseStock").value(10));
+        // 10 on hand less the 3 units deducted when the small order was confirmed
+        mvc.perform(get("/api/inventory/" + itemId)).andExpect(jsonPath("$.warehouseStock").value(7));
 
         mvc.perform(post("/api/purchase-orders/" + poId + "/receive").contentType("application/json")
                         .content("{\"receivedBy\":\"Stores\",\"lines\":[{\"sku\":\"T-OIL-1\",\"qty\":4}]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("partial-received"));
-        mvc.perform(get("/api/inventory/" + itemId)).andExpect(jsonPath("$.warehouseStock").value(14));
+        // 7 after the confirmed order, plus the 4 units received
+        mvc.perform(get("/api/inventory/" + itemId)).andExpect(jsonPath("$.warehouseStock").value(11));
 
         // Documents: a file is stored, cannot be approved until fields are filled, then can
         String docId = idOf(mvc.perform(multipart("/api/documents")
-                        .file(new MockMultipartFile("file", "invoice.pdf", "application/pdf", "pdf-bytes".getBytes()))
+                        .file(new MockMultipartFile("file", "invoice.pdf", "application/pdf", "%PDF-1.4 test".getBytes()))
                         .param("channel", "upload"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("needs-review"))
@@ -122,7 +124,7 @@ class ErpFlowIntegrationTest {
 
         // Cheque: received -> deposited -> cleared posts money into the ledger
         String paymentId = idOf(mvc.perform(post("/api/accounting/payments").contentType("application/json")
-                        .content("{\"customerName\":\"Test Shop\",\"method\":\"Cheque\",\"amount\":450,"
+                        .content("{\"customerId\":\"" + customerId + "\",\"customerName\":\"Test Shop\",\"method\":\"Cheque\",\"amount\":450,"
                                 + "\"reference\":\"CHQ-77\",\"chequeNumber\":\"77\",\"invoiceRef\":\"INV-1\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.chequeStatus").value("received"))

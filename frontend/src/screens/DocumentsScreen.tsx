@@ -23,6 +23,7 @@ import {
   cn,
   ConfidenceBadge,
   EmptyState,
+  Modal,
   PageHeader,
   SearchInput,
   StatusChip,
@@ -31,6 +32,7 @@ import { DocChannel, DocStatus, InboxDocument } from '@/types/erp';
 import { formatRs } from '@/utils/format';
 import { apiDateFromText } from '@/utils/dates';
 import type { DocumentFieldsInput } from '@/api/erp';
+import { ApiError } from '@/api/client';
 
 const DOC_STATUS_FILTERS = ['all', 'needs-review', 'auto-posted', 'approved', 'rejected', 'failed'] as const;
 type DocStatusFilter = (typeof DOC_STATUS_FILTERS)[number];
@@ -145,10 +147,34 @@ export function DocumentsScreen() {
     }
   };
 
+  // Set when the server blocks approval because the three-way match is not "matched".
+  const [matchBlock, setMatchBlock] = useState<{ docId: string; message: string } | null>(null);
+
   const handleDocAction = async (doc: InboxDocument, action: 'approved' | 'rejected') => {
     setEditMode(false);
-    const key = `${action === 'approved' ? 'approve' : 'reject'}:${doc.id}`;
-    await runGuarded(key, () => (action === 'approved' ? approveDocument(doc.id) : rejectDocument(doc.id)));
+    if (action === 'rejected') {
+      await runGuarded(`reject:${doc.id}`, () => rejectDocument(doc.id));
+      return;
+    }
+    await runGuarded(`approve:${doc.id}`, async () => {
+      try {
+        await approveDocument(doc.id);
+      } catch (error) {
+        // Only the match block is asked about. Other failures were already reported by toast.
+        if (error instanceof ApiError && error.message.startsWith('Three-way match is')) {
+          setMatchBlock({ docId: doc.id, message: error.message });
+        } else {
+          throw error;
+        }
+      }
+    });
+  };
+
+  // Owner override. The approve guard key is shared with the Approve button, so a second click
+  // during this request is ignored. The modal closes only when the request actually ran.
+  const approveAnyway = async (docId: string) => {
+    const ran = await runGuarded(`approve:${docId}`, () => approveDocument(docId, true));
+    if (ran) setMatchBlock(null);
   };
 
   // Field edits are held here while typing and saved to the backend when the field loses focus.
@@ -261,6 +287,7 @@ export function DocumentsScreen() {
               onClick={() => {
                 setSelectedDocId(null);
                 setEditMode(false);
+                setMatchBlock(null);
               }}
             >
               Back to Inbox
@@ -716,6 +743,32 @@ export function DocumentsScreen() {
             </div>
           </Card>
         </div>
+
+        {/* Owner override for a three-way match that blocks approval */}
+        <Modal
+          open={matchBlock !== null && activeDoc.id === matchBlock.docId}
+          onClose={() => setMatchBlock(null)}
+          title="Approve despite the three-way match?"
+          subtitle="The server did not approve this invoice automatically."
+          footer={
+            <>
+              <Button variant="secondary" size="sm" onClick={() => setMatchBlock(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="gold"
+                size="sm"
+                icon={<CheckCircle2 className="w-3.5 h-3.5" />}
+                onClick={() => void approveAnyway(activeDoc.id)}
+                disabled={pendingActions.has(`approve:${activeDoc.id}`)}
+              >
+                Approve anyway
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-slate-700 dark:text-slate-300">{matchBlock?.message}</p>
+        </Modal>
       </div>
     );
   }

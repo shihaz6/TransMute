@@ -4,6 +4,8 @@ import com.transmute.erp.audit.AuditService;
 import com.transmute.erp.common.BadRequestException;
 import com.transmute.erp.common.Ids;
 import com.transmute.erp.common.NotFoundException;
+import com.transmute.erp.purchasing.PurchaseOrder;
+import com.transmute.erp.purchasing.PurchaseOrderRepository;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -40,14 +42,16 @@ public class DocumentService {
     private static final String LINES_DO_NOT_ADD_UP = "Line amounts do not add up to the subtotal. Check the lines.";
 
     private final InboxDocumentRepository documents;
+    private final PurchaseOrderRepository purchaseOrders;
     private final AuditService audit;
     private final Path storageDir;
     private final InvoiceExtractor extractor;
 
-    public DocumentService(InboxDocumentRepository documents, AuditService audit,
-                           InvoiceExtractor extractor,
+    public DocumentService(InboxDocumentRepository documents, PurchaseOrderRepository purchaseOrders,
+                           AuditService audit, InvoiceExtractor extractor,
                            @Value("${transmute.storage.dir}") String storageDir) {
         this.documents = documents;
+        this.purchaseOrders = purchaseOrders;
         this.audit = audit;
         this.extractor = extractor;
         this.storageDir = Path.of(storageDir).toAbsolutePath().normalize();
@@ -109,6 +113,7 @@ public class DocumentService {
         boolean read = extractor.extract(target, contentType)
                 .map(fields -> applyExtracted(saved, fields))
                 .orElse(false);
+        refreshMatch(saved);
         audit.record("Documents", "Added document " + original + " to review",
                 read ? "Fields read from the file. Check them before approving."
                         : "Stored from upload. Fields not read from the file.",
@@ -212,7 +217,24 @@ public class DocumentService {
         if (update.total() != null) doc.setTotal(update.total());
         if (update.supplierAddress() != null) doc.setSupplierAddress(update.supplierAddress());
         if (update.supplierNtn() != null) doc.setSupplierNtn(update.supplierNtn());
+        if (NEEDS_REVIEW.equals(doc.getStatus())) {
+            refreshMatch(doc);
+        }
         return doc;
+    }
+
+    /**
+     * Recomputes the three-way match against the purchase orders of the same supplier.
+     * A missing supplier name matches no purchase orders.
+     */
+    private void refreshMatch(InboxDocument doc) {
+        List<PurchaseOrder> candidates = List.of();
+        if (notBlank(doc.getSupplier())) {
+            candidates = purchaseOrders.findAllByOrderByCreatedAtDesc().stream()
+                    .filter(po -> doc.getSupplier().equalsIgnoreCase(po.getSupplierName()))
+                    .toList();
+        }
+        doc.setThreeWayMatch(ThreeWayMatcher.match(doc.getInvoiceNumber(), doc.getLineItems(), candidates));
     }
 
     /** Approves a document once the supplier, invoice number and total are filled in. */
@@ -228,7 +250,8 @@ public class DocumentService {
         doc.setOverallConfidence(100);
         audit.record("Documents",
                 "Approved invoice " + doc.getInvoiceNumber() + " from " + doc.getSupplier(),
-                "Owner verified the invoice fields.", null, "Owner", "approved");
+                "Owner verified the invoice fields. Three-way match: " + matchStatus(doc) + ".",
+                null, "Owner", "approved");
         return doc;
     }
 
@@ -255,6 +278,11 @@ public class DocumentService {
     @Transactional(readOnly = true)
     public InboxDocument metadata(String id) {
         return get(id);
+    }
+
+    private static String matchStatus(InboxDocument doc) {
+        InboxDocument.ThreeWayMatch match = doc.getThreeWayMatch();
+        return match == null ? "not checked" : match.status();
     }
 
     private static void requireNeedsReview(InboxDocument doc, String message) {

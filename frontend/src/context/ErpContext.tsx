@@ -109,6 +109,11 @@ function errorMessage(error: unknown): string {
   return 'An unexpected error occurred.';
 }
 
+/** True when the server refused approval because the three-way match is not "matched". */
+function isThreeWayMatchBlock(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.message.startsWith('Three-way match is');
+}
+
 /** The customer fields the PATCH endpoint accepts. Balance fields are never sent. */
 const CUSTOMER_PATCH_KEYS: (keyof CustomerPatch)[] = ['name', 'contactPerson', 'phone', 'email', 'city', 'category'];
 
@@ -193,7 +198,8 @@ interface ErpContextValue {
   receivePurchaseOrder: (id: string, receipt: ReceiptInput) => Promise<void>;
   uploadDocuments: (files: File[], channel?: string) => Promise<string | undefined>;
   updateDocumentFields: (id: string, fields: DocumentFieldsInput) => Promise<void>;
-  approveDocument: (id: string) => Promise<void>;
+  /** Rejects with the ApiError when the three-way match blocks approval and overrideMatch is false. Other errors are reported by toast. */
+  approveDocument: (id: string, overrideMatch?: boolean) => Promise<void>;
   rejectDocument: (id: string) => Promise<void>;
   syncCollections: () => Promise<void>;
   changeCollectionTone: (id: string, tone: string) => Promise<void>;
@@ -578,11 +584,24 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     [run]
   );
 
+  /**
+   * overrideMatch=true is the owner override for a document whose three-way match is not "matched".
+   * A match block is rethrown as the ApiError so the screen can ask for confirmation instead of
+   * showing an error toast. Every other failure is reported by toast, as in run().
+   */
   const approveDocument = useCallback(
-    async (id: string) => {
-      await run(['documents', 'audit'], () => erpApi.approveDocument(id), 'Invoice approved');
+    async (id: string, overrideMatch = false) => {
+      try {
+        await erpApi.approveDocument(id, overrideMatch);
+      } catch (error) {
+        if (isThreeWayMatchBlock(error)) throw error;
+        addToast({ title: 'Could not complete that', description: errorMessage(error), variant: 'error' });
+        return;
+      }
+      await refreshAfterWrite(['documents', 'audit']);
+      addToast({ title: 'Invoice approved', variant: 'success' });
     },
-    [run]
+    [refreshAfterWrite, addToast]
   );
 
   const rejectDocument = useCallback(

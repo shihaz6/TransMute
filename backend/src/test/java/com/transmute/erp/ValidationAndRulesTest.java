@@ -159,7 +159,7 @@ class ValidationAndRulesTest {
     void orderTypeMustBeOrderOrQuote() throws Exception {
         String customer = createCustomer("Bad Type Shop", "0");
         mvc.perform(post("/api/orders").contentType(JSON)
-                        .content(orderJson(customer, "invoice", 1, 100)))
+                        .content(orderJson(customer, "invoice", 1)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("type must be 'order' or 'quote'"));
     }
@@ -167,7 +167,7 @@ class ValidationAndRulesTest {
     @Test
     void orderForUnknownCustomerIsNotFound() throws Exception {
         mvc.perform(post("/api/orders").contentType(JSON)
-                        .content(orderJson("NO-SUCH-CUSTOMER", "order", 1, 100)))
+                        .content(orderJson("NO-SUCH-CUSTOMER", "order", 1)))
                 .andExpect(status().isNotFound());
     }
 
@@ -175,7 +175,7 @@ class ValidationAndRulesTest {
     void orderTotalIsCalculatedOnTheServer() throws Exception {
         String customer = createCustomer("Total Shop", "0");
         // The client-sent "total" is not part of the request, so it is ignored.
-        String body = orderJson(customer, "order", 2, 150).replaceFirst("\\{", "{\"total\":1,");
+        String body = orderJson(customer, "order", 2).replaceFirst("\\{", "{\"total\":1,");
         mvc.perform(post("/api/orders").contentType(JSON).content(body))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.total").value(300));
@@ -185,7 +185,7 @@ class ValidationAndRulesTest {
     void zeroCreditLimitMeansNoCreditCheck() throws Exception {
         String customer = createCustomer("No Limit Shop", "0");
         mvc.perform(post("/api/orders").contentType(JSON)
-                        .content(orderJson(customer, "order", 1000, 150)))
+                        .content(orderJson(customer, "order", 1000)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("confirmed"));
     }
@@ -308,7 +308,7 @@ class ValidationAndRulesTest {
     void quoteCannotBeInvoiced() throws Exception {
         String customer = createCustomer("Quote Shop", "0");
         String quote = idOf(mvc.perform(post("/api/orders").contentType(JSON)
-                        .content(orderJson(customer, "quote", 1, 100)))
+                        .content(orderJson(customer, "quote", 1)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("quote"))
                 .andReturn());
@@ -321,7 +321,7 @@ class ValidationAndRulesTest {
     void orderCannotBeInvoicedTwice() throws Exception {
         String customer = createCustomer("Twice Shop", "0");
         String order = idOf(mvc.perform(post("/api/orders").contentType(JSON)
-                        .content(orderJson(customer, "order", 1, 100)))
+                        .content(orderJson(customer, "order", 1)))
                 .andReturn());
         mvc.perform(post("/api/orders/" + order + "/confirm")).andExpect(status().isOk());
         mvc.perform(post("/api/orders/" + order + "/confirm"))
@@ -333,10 +333,10 @@ class ValidationAndRulesTest {
     void creditHeldOrderCanBeConfirmedByTheOwner() throws Exception {
         String customer = createCustomer("Held Shop", "100");
         String order = idOf(mvc.perform(post("/api/orders").contentType(JSON)
-                        .content(orderJson(customer, "order", 10, 150)))
+                        .content(orderJson(customer, "order", 10)))
                 .andExpect(jsonPath("$.status").value("pending-review"))
                 .andReturn());
-        mvc.perform(post("/api/orders/" + order + "/confirm"))
+        mvc.perform(post("/api/orders/" + order + "/confirm?creditOverride=true"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("invoiced"));
     }
@@ -345,11 +345,12 @@ class ValidationAndRulesTest {
     void confirmingAnOrderAddsItsTotalToTheCustomerBalance() throws Exception {
         String customer = createCustomer("Balance Shop", "0");
         String order = idOf(mvc.perform(post("/api/orders").contentType(JSON)
-                        .content(orderJson(customer, "order", 4, 250)))
+                        .content(orderJson(customer, "order", 4)))
                 .andReturn());
         mvc.perform(post("/api/orders/" + order + "/confirm")).andExpect(status().isOk());
+        // 4 units x 150 catalogue price = 600
         mvc.perform(get("/api/customers/" + customer))
-                .andExpect(jsonPath("$.outstandingBalance").value(1000));
+                .andExpect(jsonPath("$.outstandingBalance").value(600));
     }
 
     // ---------- Purchasing ----------
@@ -465,7 +466,7 @@ class ValidationAndRulesTest {
     @Test
     void uploadRejectsAnUnknownChannel() throws Exception {
         mvc.perform(multipart("/api/documents")
-                        .file(new MockMultipartFile("file", "x.pdf", "application/pdf", "data".getBytes()))
+                        .file(new MockMultipartFile("file", "x.pdf", "application/pdf", "%PDF-1.4 test".getBytes()))
                         .param("channel", "carrier-pigeon"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("channel must be upload, email or whatsapp"));
@@ -618,18 +619,21 @@ class ValidationAndRulesTest {
 
     @Test
     void cashPaymentPostsToTheLedgerWithARunningBalance() throws Exception {
+        String customer = createCustomerWithBalance(unique("Cash Buyer"), 1000);
         BigDecimal before = latestLedgerBalance();
         mvc.perform(post("/api/accounting/payments").contentType(JSON)
-                        .content("{\"customerName\":\"Cash Buyer\",\"method\":\"Cash\",\"amount\":125.50,"
-                                + "\"reference\":\"R-1\"}"))
+                        .content("{\"customerId\":\"" + customer + "\",\"customerName\":\"Cash Buyer\","
+                                + "\"method\":\"Cash\",\"amount\":125.50,\"reference\":\"R-1\"}"))
                 .andExpect(status().isCreated());
         assertThat(latestLedgerBalance()).isEqualByComparingTo(before.add(new BigDecimal("125.50")));
     }
 
     @Test
     void nonChequePaymentsHaveNoChequeStatusToChange() throws Exception {
+        String customer = createCustomerWithBalance(unique("Cash Two"), 1000);
         String payment = idOf(mvc.perform(post("/api/accounting/payments").contentType(JSON)
-                        .content("{\"customerName\":\"Cash Two\",\"method\":\"Cash\",\"amount\":10}"))
+                        .content("{\"customerId\":\"" + customer + "\",\"customerName\":\"Cash Two\","
+                                + "\"method\":\"Cash\",\"amount\":10}"))
                 .andReturn());
         mvc.perform(patch("/api/accounting/payments/" + payment + "/cheque-status").contentType(JSON)
                         .content("{\"status\":\"deposited\"}"))
@@ -844,6 +848,13 @@ class ValidationAndRulesTest {
                 .andReturn());
     }
 
+    private String createCustomerWithBalance(String name, int balance) throws Exception {
+        return idOf(mvc.perform(post("/api/customers").contentType(JSON)
+                        .content("{\"name\":\"" + name + "\",\"creditLimit\":0,\"outstandingBalance\":" + balance + "}"))
+                .andExpect(status().isCreated())
+                .andReturn());
+    }
+
     private String createOverdueCustomer(String name, int daysOverdue, int balance) throws Exception {
         return idOf(mvc.perform(post("/api/customers").contentType(JSON)
                         .content("{\"name\":\"" + name + "\",\"contactPerson\":\"Owner\",\"phone\":\"0770000000\","
@@ -893,15 +904,17 @@ class ValidationAndRulesTest {
 
     private String uploadDocument(String name) throws Exception {
         return idOf(mvc.perform(multipart("/api/documents")
-                        .file(new MockMultipartFile("file", name, "application/pdf", "pdf-bytes".getBytes()))
+                        .file(new MockMultipartFile("file", name, "application/pdf", "%PDF-1.4 test".getBytes()))
                         .param("channel", "upload"))
                 .andExpect(status().isCreated())
                 .andReturn());
     }
 
     private String chequePayment(String number) throws Exception {
+        String customer = createCustomerWithBalance(unique("Cheque Payer"), 1000);
         return idOf(mvc.perform(post("/api/accounting/payments").contentType(JSON)
-                        .content("{\"customerName\":\"Cheque Payer\",\"method\":\"Cheque\",\"amount\":50,"
+                        .content("{\"customerId\":\"" + customer + "\",\"customerName\":\"Cheque Payer\","
+                                + "\"method\":\"Cheque\",\"amount\":50,"
                                 + "\"chequeNumber\":\"" + number + "\",\"invoiceRef\":\"INV-C\"}"))
                 .andExpect(status().isCreated())
                 .andReturn());
@@ -932,10 +945,11 @@ class ValidationAndRulesTest {
                 + "\"reorderLevel\":" + reorderLevel + ",\"unitCost\":100,\"salePrice\":150}";
     }
 
-    private static String orderJson(String customerId, String type, int qty, int unitPrice) {
+    /** Order line for SHARED-SKU at its catalogue price (150); no priceOverride, so the price is enforced. */
+    private static String orderJson(String customerId, String type, int qty) {
         return "{\"type\":\"" + type + "\",\"customerId\":\"" + customerId + "\",\"source\":\"walk-in\","
                 + "\"items\":[{\"id\":\"l1\",\"sku\":\"" + SHARED_SKU + "\",\"productName\":\"Thing\",\"qty\":" + qty
-                + ",\"unit\":\"Cases\",\"unitPrice\":" + unitPrice
+                + ",\"unit\":\"Cases\",\"unitPrice\":150"
                 + ",\"warehouseStock\":0,\"shopStock\":0,\"vanStock\":0}]}";
     }
 

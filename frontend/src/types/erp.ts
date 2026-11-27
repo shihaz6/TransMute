@@ -130,6 +130,7 @@ export interface Customer {
   name: string;
   contactPerson: string;
   phone: string;
+  email: string;
   city: string;
   category: 'Supermarket' | 'Grocery / Retail' | 'Sub-Distributor' | 'Hotel / Bakery';
   outstandingBalance: number;
